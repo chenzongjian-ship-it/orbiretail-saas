@@ -1,34 +1,33 @@
-# Batch 48：导航稳定性修复 + 顶部原生白条隐藏
+# Batch 49：侧边栏恢复 + 导航报错修复
 
-本版本基于 Batch 47 做稳定性修复：
+本版本修复两个关键问题：
 
-1. 修复侧边栏导航需要点击两次、页面回弹的问题。
-2. 使用 `page` 与 `nav_page` 双状态同步，避免 Streamlit radio 与程序跳转状态冲突。
-3. 隐藏 Streamlit 原生顶部工具栏 / 白条，让产品更像独立 SaaS。
-4. 保留 Batch 47 的支付回调验签、订单对账、会员生命周期、管理员后台等能力。
+1. 侧边栏收起后无法再次打开。
+   - 原因：此前隐藏了 Streamlit header，导致左上角原生侧边栏展开按钮不可用。
+   - 修复：保留 header 与侧边栏按钮，仅隐藏不必要的顶部工具栏装饰。
+
+2. 页面点击后回弹 / 报错。
+   - 原因：程序在 Streamlit radio 组件创建之后又修改了同名 session_state key，触发 StreamlitAPIException。
+   - 修复：侧边栏导航从 radio 改为 button 列表；导航只维护单一 page 状态，不再修改 nav_page widget state。
 
 ## 部署
 
-上传覆盖以下文件即可：
+上传覆盖：
+
+- app.py
+- requirements.txt
+- README.md
+
+建议继续保留：
+
+- .streamlit/config.toml
+- docs/
+- migrations/
+
+提交信息建议：
 
 ```text
-app.py
-requirements.txt
-README.md
+Batch 49 sidebar navigation fix
 ```
 
-建议同时保留：
-
-```text
-.streamlit/config.toml
-docs/
-migrations/
-```
-
-线上地址仍为：
-
-```text
-https://orbiretail-saas.streamlit.app/
-```
-
-如果 Streamlit Cloud 未自动更新，请点击右下角 Manage app → Reboot app。
+然后等待 Streamlit Cloud 自动重新部署。如果没有刷新，点击 Manage app → Reboot app。

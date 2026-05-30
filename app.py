@@ -32,13 +32,13 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-/* Hide Streamlit native top toolbar/header so the product looks like a standalone SaaS. */
+/* Keep Streamlit header visible enough to preserve the native sidebar reopen button.
+   Hide only the extra toolbar/menu decorations that are not needed by end users. */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
-header {visibility: hidden;}
-[data-testid="stHeader"] {display: none;}
-[data-testid="stToolbar"] {display: none;}
-[data-testid="stDecoration"] {display: none;}
+header {visibility: visible !important; background: transparent !important;}
+[data-testid="stToolbar"] {display: none !important;}
+[data-testid="stDecoration"] {display: none !important;}
 .stDeployButton {display: none;}
 .stApp {
   background:
@@ -662,17 +662,17 @@ def get_refunds_df() -> pd.DataFrame:
 NAV_PAGES = ["首页", "工作台", "模板中心", "AI智能中心", "AI作业批改", "订阅与支付", "支付回调与对账", "会员生命周期", "管理员后台", "反馈"]
 
 def goto_page(page_name: str):
-    """Single source of truth for page navigation.
+    """Navigate without mutating any active widget state.
 
-    Streamlit reruns the script on each widget interaction. If the sidebar radio
-    keeps its own stale widget state while the app changes st.session_state.page
-    programmatically, the next run can bounce back to the previous page.
-    Updating both page and nav_page together prevents the one-click-late issue.
+    Earlier versions also wrote st.session_state.nav_page after the sidebar
+    radio widget had been instantiated. Streamlit forbids changing a widget
+    backed session key after creation, which caused StreamlitAPIException and
+    page bounce. This version keeps a single page state and uses sidebar
+    buttons instead of a radio widget.
     """
     if page_name not in NAV_PAGES:
         page_name = "首页"
     st.session_state.page = page_name
-    st.session_state.nav_page = page_name
 
 def login_panel(mode: str):
     st.markdown("<div class='card'>", unsafe_allow_html=True)
@@ -735,14 +735,8 @@ def require_login_notice():
     return False
 
 def sidebar():
-    if "page" not in st.session_state:
+    if "page" not in st.session_state or st.session_state.page not in NAV_PAGES:
         st.session_state.page = "首页"
-    if st.session_state.page not in NAV_PAGES:
-        st.session_state.page = "首页"
-    if "nav_page" not in st.session_state:
-        st.session_state.nav_page = st.session_state.page
-    if st.session_state.nav_page not in NAV_PAGES:
-        st.session_state.nav_page = st.session_state.page
 
     with st.sidebar:
         st.markdown(f"## ✨ {APP_NAME}")
@@ -758,12 +752,17 @@ def sidebar():
         else:
             st.info("未登录")
 
-        selected_page = st.radio("导航", NAV_PAGES, key="nav_page")
-        if selected_page != st.session_state.page:
-            st.session_state.page = selected_page
+        st.markdown("#### 导航")
+        for nav in NAV_PAGES:
+            is_current = st.session_state.page == nav
+            label = f"● {nav}" if is_current else f"○ {nav}"
+            if st.button(label, key=f"nav_btn_{nav}", use_container_width=True, disabled=is_current):
+                goto_page(nav)
+                st.rerun()
 
         st.divider()
         st.caption(f"客服邮箱：{CONTACT_EMAIL}")
+        st.caption("提示：左上角 Streamlit 侧栏按钮可随时展开/收起导航。")
 
 def render_analysis_result(df, scenario, result, allow_download):
     st.markdown("#### 分析结果")
