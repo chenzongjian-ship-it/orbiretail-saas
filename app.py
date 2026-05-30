@@ -32,6 +32,14 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+/* Hide Streamlit native top toolbar/header so the product looks like a standalone SaaS. */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+[data-testid="stHeader"] {display: none;}
+[data-testid="stToolbar"] {display: none;}
+[data-testid="stDecoration"] {display: none;}
+.stDeployButton {display: none;}
 .stApp {
   background:
     radial-gradient(circle at top left, rgba(37,99,235,.14), transparent 27%),
@@ -649,6 +657,23 @@ def get_refunds_df() -> pd.DataFrame:
     conn.close()
     return df
 
+
+
+NAV_PAGES = ["首页", "工作台", "模板中心", "AI智能中心", "AI作业批改", "订阅与支付", "支付回调与对账", "会员生命周期", "管理员后台", "反馈"]
+
+def goto_page(page_name: str):
+    """Single source of truth for page navigation.
+
+    Streamlit reruns the script on each widget interaction. If the sidebar radio
+    keeps its own stale widget state while the app changes st.session_state.page
+    programmatically, the next run can bounce back to the previous page.
+    Updating both page and nav_page together prevents the one-click-late issue.
+    """
+    if page_name not in NAV_PAGES:
+        page_name = "首页"
+    st.session_state.page = page_name
+    st.session_state.nav_page = page_name
+
 def login_panel(mode: str):
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("登录 / 注册")
@@ -662,7 +687,7 @@ def login_panel(mode: str):
             if u:
                 st.session_state.user = u
                 st.session_state.preview = False
-                st.session_state.page = "工作台"
+                goto_page("工作台")
                 st.success("登录成功。")
                 st.rerun()
             else:
@@ -674,14 +699,14 @@ def login_panel(mode: str):
                 u = login_user(email, pwd)
                 st.session_state.user = u
                 st.session_state.preview = False
-                st.session_state.page = "工作台"
+                goto_page("工作台")
                 st.success("注册成功，已开通10天会员能力试用。")
                 st.rerun()
             else:
                 st.error(msg)
     if st.button("立即使用：先进入主界面预览", use_container_width=True, key=f"preview_{mode}"):
         st.session_state.preview = True
-        st.session_state.page = "工作台"
+        goto_page("工作台")
         st.rerun()
     st.caption("立即使用无需注册，可浏览全部能力；真正上传、分析、下载、保存设置时需登录。")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -704,7 +729,7 @@ def require_login_notice():
     if not is_logged_in():
         st.markdown("<div class='warnbox'>当前为预览模式。你可以查看功能与演示数据，但要执行上传、下载、保存设置或正式分析，请先登录 / 注册。</div>", unsafe_allow_html=True)
         if st.button("返回登录 / 注册", use_container_width=True):
-            st.session_state.page = "首页"
+            goto_page("首页")
             st.rerun()
         return True
     return False
@@ -712,6 +737,13 @@ def require_login_notice():
 def sidebar():
     if "page" not in st.session_state:
         st.session_state.page = "首页"
+    if st.session_state.page not in NAV_PAGES:
+        st.session_state.page = "首页"
+    if "nav_page" not in st.session_state:
+        st.session_state.nav_page = st.session_state.page
+    if st.session_state.nav_page not in NAV_PAGES:
+        st.session_state.nav_page = st.session_state.page
+
     with st.sidebar:
         st.markdown(f"## ✨ {APP_NAME}")
         st.caption("数据智能与AI效率平台")
@@ -725,8 +757,11 @@ def sidebar():
             st.info("立即使用预览模式")
         else:
             st.info("未登录")
-        pages = ["首页", "工作台", "模板中心", "AI智能中心", "AI作业批改", "订阅与支付", "支付回调与对账", "会员生命周期", "管理员后台", "反馈"]
-        st.session_state.page = st.radio("导航", pages, index=pages.index(st.session_state.page) if st.session_state.page in pages else 0)
+
+        selected_page = st.radio("导航", NAV_PAGES, key="nav_page")
+        if selected_page != st.session_state.page:
+            st.session_state.page = selected_page
+
         st.divider()
         st.caption(f"客服邮箱：{CONTACT_EMAIL}")
 
@@ -802,7 +837,7 @@ def template_center():
             with c:
                 st.markdown(f"<div class='template-card'><h4>{s['name']}</h4><p><b>分类：</b>{s['category']}</p><p><b>适合：</b>{s['target']}</p><p><b>输入：</b>{s['inputs']}</p><p><b>输出：</b>{s['outputs']}</p></div>", unsafe_allow_html=True)
                 if st.button("使用此模板", key=f"use_{s['name']}", use_container_width=True):
-                    st.session_state.page = "工作台"
+                    goto_page("工作台")
                     st.rerun()
 
 def ai_center():
