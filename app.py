@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-OrbiRetail 奥比零售云 - Batch 42 电商公司场景包 + AI Agent 智能助手
+OrbiRetail 奥比零售云 - Batch 44 AI Agent 真实大模型接入 + 教育智能化增强
 
 新增：
 1. 支付系统雏形
@@ -20,10 +20,14 @@ import hmac
 import io
 import json
 import os
+import re
+import math
 import secrets
 import sqlite3
 import textwrap
 import zipfile
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -32,7 +36,7 @@ import pandas as pd
 import streamlit as st
 
 APP_NAME = "OrbiRetail 奥比零售云"
-APP_VERSION = "Batch 42 电商公司场景包 + AI Agent 智能助手"
+APP_VERSION = "Batch 44 AI Agent 真实大模型接入 + 教育智能化增强"
 TRIAL_DAYS = 10
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "saas_data"
@@ -396,6 +400,22 @@ def init_db() -> None:
             created_at TEXT NOT NULL,
             FOREIGN KEY(user_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS assignment_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            student_name TEXT NOT NULL,
+            assignment_title TEXT NOT NULL,
+            assignment_type TEXT NOT NULL,
+            score REAL NOT NULL,
+            level TEXT NOT NULL,
+            similarity_flag TEXT NOT NULL DEFAULT '正常',
+            praise_or_warning TEXT,
+            created_at TEXT NOT NULL,
+            feedback_json TEXT NOT NULL,
+            FOREIGN KEY(company_id) REFERENCES companies(id),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
         """
     )
     conn.commit()
@@ -555,6 +575,19 @@ TEMPLATES: List[Dict[str, Any]] = [
         "desc": "面向互联网电商公司，自动汇总退换货、退款和售后工单，识别高风险商品、异常退款原因和客服处理效率问题。",
     },
     {
+        "id": "higher_education_career",
+        "name": "高校教务 / 实习 / 就业数据汇总",
+        "category": "高校教育",
+        "icon": "🎓",
+        "target": "高校院系、教务办、就业办、学生工作办公室、实习管理老师",
+        "input": "学生基础信息、实习记录、就业去向、岗位薪资、行业地区、未就业跟进表",
+        "output": "实习单位汇总、就业去向统计、专业/班级就业率、岗位行业分布、薪资区间、未就业学生清单、院系汇总报告",
+        "save_time": "每学期 4-12 小时",
+        "required": ["学院", "专业", "班级", "姓名", "就业状态"],
+        "group_by": ["学院", "专业", "班级", "就业状态"],
+        "desc": "面向高校院系和就业管理场景，自动汇总学生实习、就业去向、行业岗位、薪资区间和未就业学生清单，并生成院系汇总报告。",
+    },
+    {
         "id": "boss_daily",
         "name": "老板经营日报",
         "category": "零售经营",
@@ -675,6 +708,19 @@ FIELD_ALIASES: Dict[str, List[str]] = {
     "盘点库存": ["盘点库存", "实际库存", "实盘数量", "CountedStock"],
     "员工": ["员工", "员工姓名", "姓名", "Employee"],
     "工资": ["工资", "应发工资", "实发工资", "Salary"],
+    "学院": ["学院", "院系", "二级学院", "所属学院", "学院名称", "College", "Faculty"],
+    "专业": ["专业", "专业名称", "培养专业", "Major"],
+    "班级": ["班级", "班级名称", "行政班", "Class"],
+    "学号": ["学号", "学生编号", "StudentID", "student_id"],
+    "姓名": ["姓名", "学生", "学生姓名", "Name", "StudentName"],
+    "实习单位": ["实习单位", "实习企业", "实习公司", "单位名称", "Employer", "Company"],
+    "就业单位": ["就业单位", "签约单位", "录用单位", "工作单位", "Employer"],
+    "就业状态": ["就业状态", "去向", "毕业去向", "就业去向", "是否就业", "状态", "EmploymentStatus"],
+    "岗位": ["岗位", "职位", "岗位名称", "Job", "Position"],
+    "行业": ["行业", "所属行业", "就业行业", "Industry"],
+    "薪资": ["薪资", "月薪", "薪酬", "税前薪资", "实习薪资", "Salary"],
+    "地区": ["地区", "城市", "就业地区", "工作地点", "Region", "City"],
+    "升学单位": ["升学单位", "升学院校", "读研学校", "录取院校"],
 }
 
 
@@ -868,6 +914,39 @@ def sample_dataframe(template: Dict[str, Any], batch: bool = False) -> pd.DataFr
         # 加入两条有问题的样例，帮助用户看到问题清单价值
         rows.append({"申请日期": base_dates[-1].date().isoformat(), "店铺": "抖音小店", "渠道": "抖音", "订单号": "EC-RISK-001", "商品": "无线耳机A1", "售后类型": "退货退款", "退款原因": "", "处理状态": "处理中", "退款金额": 1280, "赔付金额": 0, "响应时长": 15, "处理时长": 78, "客服": "小陈", "备注": "高金额且超时"})
         rows.append({"申请日期": base_dates[-1].date().isoformat(), "店铺": "京东自营店", "渠道": "京东", "订单号": "", "商品": "智能手表S2", "售后类型": "仅退款", "退款原因": "描述不符", "处理状态": "", "退款金额": "abc", "赔付金额": 0, "响应时长": 2, "处理时长": 8, "客服": "小李", "备注": "字段异常"})
+    elif template["id"] == "higher_education_career":
+        colleges = ["信息工程学院", "经济管理学院", "智能制造学院"]
+        majors = ["软件工程", "电子商务", "机械设计制造"]
+        classes = ["2026届1班", "2026届2班"]
+        statuses = ["已就业", "已就业", "升学", "待就业", "自由职业", "实习中"]
+        industries = ["互联网", "教育培训", "智能制造", "金融服务", "跨境电商"]
+        regions = ["杭州", "上海", "深圳", "南京", "洛阳"]
+        jobs = ["数据运营", "软件开发", "产品助理", "教务运营", "电商运营", "机械工程师"]
+        companies = ["星云科技", "洛阳智造", "云杉教育", "河洛电商", "蓝海数据"]
+        idx = 0
+        for ci, college in enumerate(colleges):
+            for mi, major in enumerate(majors):
+                for cls in classes:
+                    for n in range(5 if batch else 3):
+                        status = statuses[(idx + ci + mi + n) % len(statuses)]
+                        salary = 0 if status in ["待就业", "升学"] else 4200 + (idx % 9) * 650
+                        rows.append({
+                            "学院": college,
+                            "专业": major,
+                            "班级": cls,
+                            "学号": f"2026{ci}{mi}{n:03d}",
+                            "姓名": f"学生{idx+1:03d}",
+                            "实习单位": companies[(idx+n) % len(companies)],
+                            "就业单位": "" if status in ["待就业", "升学"] else companies[(idx+1) % len(companies)],
+                            "就业状态": status,
+                            "岗位": jobs[(idx+n) % len(jobs)],
+                            "行业": industries[(idx+mi) % len(industries)],
+                            "薪资": salary,
+                            "地区": regions[(idx+ci) % len(regions)],
+                            "备注": "样例数据"
+                        })
+                        idx += 1
+        rows.append({"学院": "信息工程学院", "专业": "软件工程", "班级": "2026届1班", "学号": "", "姓名": "学生异常A", "实习单位": "", "就业单位": "", "就业状态": "待就业", "岗位": "", "行业": "", "薪资": 0, "地区": "", "备注": "缺少学号与实习单位"})
     elif template["id"] in {"retail_daily", "boss_daily", "platform_settlement"}:
         stores = ["上海人民广场店", "杭州西湖店", "南京新街口店"]
         channels = ["美团", "饿了么", "线下POS"]
@@ -1088,7 +1167,186 @@ def analyze_ecommerce_after_sales(df: pd.DataFrame, template: Dict[str, Any]) ->
     }
 
 
+def _employment_positive(status: Any) -> bool:
+    text = str(status).strip()
+    return any(k in text for k in ["已就业", "签约", "升学", "创业", "自由职业", "实习中", "录用", "已落实"])
+
+
+def analyze_higher_education_career(df: pd.DataFrame, template: Dict[str, Any]) -> Dict[str, Any]:
+    """高校教务 / 实习 / 就业数据汇总专用分析。"""
+    if df.empty:
+        raise ValueError("上传文件没有可分析的数据。")
+    cols = list(df.columns)
+    field_map = {std: find_field(cols, std) for std in FIELD_ALIASES.keys()}
+    required_missing = [f for f in template.get("required", []) if not find_field(cols, f)]
+    issues: List[Dict[str, Any]] = []
+    for field in required_missing:
+        issues.append({"级别": "ERROR", "问题类型": "缺少必需字段", "问题详情": f"缺少字段：{field}", "建议处理": "请检查院系统计表列名，或在字段字典中补充别名。", "行号": "", "来源文件": ""})
+
+    df_clean = df.copy()
+    college_col = field_map.get("学院")
+    major_col = field_map.get("专业")
+    class_col = field_map.get("班级")
+    name_col = field_map.get("姓名") or field_map.get("员工")
+    sid_col = field_map.get("学号")
+    internship_col = field_map.get("实习单位")
+    employer_col = field_map.get("就业单位") or internship_col
+    status_col = field_map.get("就业状态")
+    job_col = field_map.get("岗位")
+    industry_col = field_map.get("行业")
+    salary_col = field_map.get("薪资") or field_map.get("工资")
+    region_col = field_map.get("地区") or field_map.get("区域")
+
+    if status_col:
+        df_clean["__employed_flag"] = df_clean[status_col].apply(_employment_positive)
+    else:
+        df_clean["__employed_flag"] = False
+    if salary_col:
+        df_clean["__salary"] = to_number(df_clean[salary_col])
+    else:
+        df_clean["__salary"] = 0
+
+    # 行级质检
+    for idx, row in df_clean.iterrows():
+        for field, col in [("学院", college_col), ("专业", major_col), ("班级", class_col), ("姓名", name_col), ("就业状态", status_col)]:
+            if col and (pd.isna(row.get(col)) or str(row.get(col)).strip() == ""):
+                issues.append({"级别": "WARNING", "问题类型": "高校关键字段为空", "问题详情": f"字段 {field} 为空", "建议处理": "补齐后再进入院系统计或就业率核算。", "行号": int(idx)+2, "来源文件": row.get("来源文件", "")})
+        if sid_col and str(row.get(sid_col, "")).strip() == "":
+            issues.append({"级别": "WARNING", "问题类型": "学号为空", "问题详情": "学号为空，可能影响学生追踪和去重。", "建议处理": "建议补充学号或学生唯一编号。", "行号": int(idx)+2, "来源文件": row.get("来源文件", "")})
+        if status_col and str(row.get(status_col, "")).strip() in ["待就业", "未就业", "未落实"]:
+            issues.append({"级别": "INFO", "问题类型": "未就业学生", "问题详情": f"学生 {row.get(name_col, '')} 当前状态为 {row.get(status_col, '')}", "建议处理": "纳入就业帮扶跟进名单。", "行号": int(idx)+2, "来源文件": row.get("来源文件", "")})
+
+    # 汇总维度
+    group_fields = [c for c in [college_col, major_col, class_col, status_col] if c]
+    if group_fields:
+        summary = df_clean.groupby(group_fields, dropna=False).agg(
+            学生数=("__employed_flag", "count"),
+            已落实人数=("__employed_flag", "sum"),
+            平均薪资=("__salary", "mean"),
+        ).reset_index()
+        summary["就业落实率"] = (summary["已落实人数"] / summary["学生数"] * 100).round(2)
+    else:
+        summary = pd.DataFrame({"学生数": [len(df_clean)], "已落实人数": [int(df_clean["__employed_flag"].sum())]})
+        summary["就业落实率"] = (summary["已落实人数"] / summary["学生数"] * 100).round(2)
+
+    def safe_group(col: Optional[str], name: str) -> pd.DataFrame:
+        if not col:
+            return pd.DataFrame({name: [], "人数": []})
+        return df_clean.groupby(col, dropna=False).size().reset_index(name="人数").rename(columns={col: name}).sort_values("人数", ascending=False)
+
+    internship_summary = safe_group(internship_col, "实习单位")
+    status_summary = safe_group(status_col, "就业去向")
+    industry_summary = safe_group(industry_col, "行业")
+    job_summary = safe_group(job_col, "岗位")
+    region_summary = safe_group(region_col, "地区")
+
+    # 专业 / 班级就业率
+    rate_fields = [c for c in [college_col, major_col, class_col] if c]
+    if rate_fields:
+        employment_rate = df_clean.groupby(rate_fields, dropna=False).agg(
+            学生数=("__employed_flag", "count"),
+            已落实人数=("__employed_flag", "sum"),
+            平均薪资=("__salary", "mean"),
+        ).reset_index()
+        employment_rate["就业落实率"] = (employment_rate["已落实人数"] / employment_rate["学生数"] * 100).round(2)
+    else:
+        employment_rate = summary.copy()
+
+    # 薪资区间
+    salary_bins = [-1, 0, 3000, 5000, 8000, 12000, 20000, 10**9]
+    salary_labels = ["未填写/无薪资", "0-3000", "3000-5000", "5000-8000", "8000-12000", "12000-20000", "20000+"]
+    df_clean["__salary_band"] = pd.cut(df_clean["__salary"], bins=salary_bins, labels=salary_labels)
+    salary_band = df_clean.groupby("__salary_band", dropna=False).size().reset_index(name="人数").rename(columns={"__salary_band": "薪资区间"})
+
+    # 未就业学生清单
+    if status_col:
+        unemployed_mask = df_clean[status_col].astype(str).str.contains("待就业|未就业|未落实", regex=True, na=False)
+    else:
+        unemployed_mask = pd.Series([False] * len(df_clean))
+    cols_for_unemployed = [c for c in [college_col, major_col, class_col, sid_col, name_col, status_col, job_col, industry_col, region_col] if c]
+    unemployed = df_clean.loc[unemployed_mask, cols_for_unemployed].copy() if cols_for_unemployed else pd.DataFrame()
+
+    # 院系汇总报告
+    if college_col:
+        college_report = df_clean.groupby(college_col, dropna=False).agg(
+            学生数=("__employed_flag", "count"),
+            已落实人数=("__employed_flag", "sum"),
+            平均薪资=("__salary", "mean"),
+        ).reset_index().rename(columns={college_col: "学院"})
+        college_report["就业落实率"] = (college_report["已落实人数"] / college_report["学生数"] * 100).round(2)
+    else:
+        college_report = pd.DataFrame()
+
+    issue_df = pd.DataFrame(issues) if issues else pd.DataFrame(columns=["级别", "问题类型", "问题详情", "建议处理", "行号", "来源文件"])
+    field_df = detect_fields(df, template)
+    required_score = max(0, 100 - len(required_missing) * 20)
+    issue_score = max(0, 100 - len(issue_df) * 2)
+    trust_score = int(round(required_score * 0.55 + issue_score * 0.45))
+    if required_missing:
+        trust_level = "不可直接使用"
+    elif trust_score >= 82:
+        trust_level = "可信"
+    elif trust_score >= 65:
+        trust_level = "需复核"
+    else:
+        trust_level = "不可直接使用"
+
+    total_students = len(df_clean)
+    employed_count = int(df_clean["__employed_flag"].sum())
+    employment_rate_total = round(employed_count / total_students * 100, 2) if total_students else 0
+    avg_salary = float(df_clean.loc[df_clean["__salary"] > 0, "__salary"].mean()) if (df_clean["__salary"] > 0).any() else 0.0
+    top_industry = industry_summary.iloc[0, 0] if not industry_summary.empty else "暂无"
+    top_employer = internship_summary.iloc[0, 0] if not internship_summary.empty else "暂无"
+    diagnosis = [
+        f"本次共处理 {total_students} 名学生数据，就业/升学/实习等已落实人数 {employed_count}，总体落实率 {employment_rate_total}%。",
+        f"平均薪资约 {avg_salary:,.2f} 元；样本最多的行业是：{top_industry}。",
+        f"实习/就业单位出现频次最高的是：{top_employer}。",
+        f"数据可信度为 {trust_score}/100，判断为：{trust_level}。",
+    ]
+    if len(unemployed) > 0:
+        diagnosis.append(f"系统识别到 {len(unemployed)} 名待就业/未落实学生，建议纳入院系就业帮扶跟进。")
+    recommendations = [
+        "优先核对未就业学生清单，补充联系方式、求职意向和帮扶状态。",
+        "按专业/班级就业落实率排序，定位需要重点跟进的班级。",
+        "结合岗位和行业分布，调整实习基地和就业推荐方向。",
+        "薪资区间统计适合作为就业质量分析参考，不建议单独作为教学质量评价依据。",
+    ]
+    metrics = {
+        "记录数": total_students,
+        "金额合计": avg_salary,
+        "净额": employment_rate_total,
+        "问题数": len(issue_df),
+        "数据可信度": trust_score,
+        "可信等级": trust_level,
+        "就业落实率": employment_rate_total,
+        "平均薪资": avg_salary,
+    }
+    return {
+        "template": template,
+        "raw": df,
+        "field_detection": field_df,
+        "summary": summary,
+        "issues": issue_df,
+        "metrics": metrics,
+        "diagnosis": diagnosis,
+        "recommendations": recommendations,
+        "extra_sheets": {
+            "实习单位汇总": internship_summary,
+            "就业去向统计": status_summary,
+            "专业班级就业率": employment_rate,
+            "岗位行业分布": pd.concat([industry_summary.assign(类型="行业").rename(columns={"行业":"名称"}), job_summary.assign(类型="岗位").rename(columns={"岗位":"名称"})], ignore_index=True) if not job_summary.empty or not industry_summary.empty else pd.DataFrame(),
+            "薪资区间统计": salary_band,
+            "未就业学生清单": unemployed,
+            "院系汇总报告": college_report,
+            "地区分布": region_summary,
+        },
+        "created_at": now_iso(),
+    }
+
+
 def analyze_dataframe(df: pd.DataFrame, template: Dict[str, Any]) -> Dict[str, Any]:
+    if template.get("id") == "higher_education_career":
+        return analyze_higher_education_career(df, template)
     if template.get("id") == "ecommerce_after_sales":
         return analyze_ecommerce_after_sales(df, template)
     if df.empty:
@@ -1349,8 +1607,8 @@ def render_login_page() -> None:
         st.markdown(
             """
             <div class='orbi-hero'>
-                <h1>从门店到电商售后，用 AI 帮你看清经营问题。</h1>
-                <p>上传门店、渠道、财务、电商售后 Excel，自动完成汇总、对账、退款/售后工单分析、经营诊断和老板摘要。新版新增电商退换货/售后工单场景包与 AI Agent 智能助手。</p>
+                <h1>从经营数据到高校作业，用 AI 帮你把重复工作自动化。</h1>
+                <p>上传门店、财务、电商售后、高校就业 Excel，自动完成汇总、对账、诊断和报告。新版新增高校教务/实习/就业数据汇总，以及 Word/PDF/ZIP 作业包 AI 批改能力。</p>
                 <div class='orbi-pill-row'>
                     <span class='orbi-pill'>10 天会员能力试用</span>
                     <span class='orbi-pill'>免费版 + 低价会员版</span>
@@ -1364,7 +1622,7 @@ def render_login_page() -> None:
         )
         a, b, c = st.columns(3)
         for col, title, text in [
-            (a, "9 个场景", "新增互联网电商售后场景，覆盖零售、财务、销售、库存、人事。"),
+            (a, "10 个场景", "新增高校就业与 AI 作业批改，覆盖零售、电商、财务、教育、库存、人事。"),
             (b, "1 分钟", "样例数据快速体验完整流程。"),
             (c, "高性价比", "免费版长期可用，会员版低价解锁完整能力。"),
         ]:
@@ -1531,8 +1789,339 @@ def render_result(user: sqlite3.Row, company: sqlite3.Row, result: Dict[str, Any
         st.session_state["analysis_result"] = result
 
 
+
+# -----------------------------------------------------------------------------
+# Batch 44: AI provider adapters and intelligent analysis helpers
+# -----------------------------------------------------------------------------
+AI_PROVIDER_DEFAULTS: Dict[str, Dict[str, str]] = {
+    "openai": {
+        "label": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+        "key_env": "OPENAI_API_KEY",
+    },
+    "qwen": {
+        "label": "通义千问 / 阿里云百炼",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen-plus",
+        "key_env": "DASHSCOPE_API_KEY",
+    },
+    "zhipu": {
+        "label": "智谱 GLM",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-4-flash",
+        "key_env": "ZHIPU_API_KEY",
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+        "key_env": "DEEPSEEK_API_KEY",
+    },
+}
+
+
+def _secret_or_env(name: str, default: str = "") -> str:
+    """Read AI configuration from Streamlit secrets, session input, or environment."""
+    try:
+        value = st.secrets.get(name)  # type: ignore[attr-defined]
+        if value:
+            return str(value)
+    except Exception:
+        pass
+    if st.session_state.get(name):
+        return str(st.session_state.get(name))
+    return os.getenv(name, default)
+
+
+def get_ai_runtime_config() -> Dict[str, str]:
+    provider = str(st.session_state.get("AI_PROVIDER", _secret_or_env("ORBI_AI_PROVIDER", "rules"))).lower().strip()
+    if provider not in AI_PROVIDER_DEFAULTS:
+        provider = "rules"
+    if provider == "rules":
+        return {"provider": "rules", "label": "本地规则模式", "base_url": "", "model": "", "api_key": ""}
+    d = AI_PROVIDER_DEFAULTS[provider]
+    api_key = _secret_or_env(d["key_env"], "")
+    base_url = _secret_or_env(f"{provider.upper()}_BASE_URL", d["base_url"]).rstrip("/")
+    model = _secret_or_env(f"{provider.upper()}_MODEL", d["model"])
+    return {"provider": provider, "label": d["label"], "base_url": base_url, "model": model, "api_key": api_key}
+
+
+def ai_provider_ready() -> bool:
+    cfg = get_ai_runtime_config()
+    return bool(cfg.get("provider") != "rules" and cfg.get("api_key"))
+
+
+def call_chat_completion(system_prompt: str, user_prompt: str, temperature: float = 0.25, max_tokens: int = 900) -> Tuple[Optional[str], str]:
+    """Call an OpenAI-compatible chat completion endpoint. Falls back safely when unconfigured."""
+    cfg = get_ai_runtime_config()
+    if cfg.get("provider") == "rules":
+        return None, "当前为本地规则模式，未调用外部大模型。"
+    if not cfg.get("api_key"):
+        return None, f"未配置 {cfg.get('label')} API Key。请在 AI 智能中心临时输入，或在 Streamlit Secrets/环境变量中配置。"
+    payload = {
+        "model": cfg["model"],
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    url = cfg["base_url"].rstrip("/") + "/chat/completions"
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {cfg['api_key']}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            raw = resp.read().decode("utf-8")
+        obj = json.loads(raw)
+        content = obj.get("choices", [{}])[0].get("message", {}).get("content")
+        if not content:
+            return None, "大模型返回为空，已改用本地规则结果。"
+        return str(content).strip(), "ok"
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = exc.read().decode("utf-8")[:600]
+        except Exception:
+            detail = str(exc)
+        return None, f"大模型接口 HTTP 错误：{exc.code}；{detail}"
+    except Exception as exc:
+        return None, f"大模型接口调用失败：{exc}"
+
+
+def result_brief_for_ai(result: Optional[Dict[str, Any]], max_rows: int = 12) -> str:
+    if not result:
+        return "当前还没有分析结果。请先启动样例体验或上传数据进行分析。"
+    lines = [
+        f"场景模板：{result.get('template', {}).get('name', '')}",
+        f"分类：{result.get('template', {}).get('category', '')}",
+        "核心指标：" + json.dumps(result.get("metrics", {}), ensure_ascii=False),
+        "经营诊断：" + "；".join(result.get("diagnosis", [])[:5]),
+        "建议动作：" + "；".join(result.get("recommendations", [])[:5]),
+    ]
+    issues = result.get("issues")
+    if isinstance(issues, pd.DataFrame) and not issues.empty:
+        lines.append("问题清单样例：" + issues.head(max_rows).to_json(orient="records", force_ascii=False))
+    summary = result.get("summary")
+    if isinstance(summary, pd.DataFrame) and not summary.empty:
+        lines.append("汇总样例：" + summary.head(max_rows).to_json(orient="records", force_ascii=False))
+    return "\n".join(lines)
+
+
+def fallback_business_insight(result: Optional[Dict[str, Any]]) -> str:
+    if not result:
+        return "请先运行一次样例体验或上传数据分析。AI 会基于已生成的经营指标、问题清单和汇总表给出分析。"
+    m = result.get("metrics", {})
+    trust = m.get("数据可信度", 0)
+    issue_count = int(m.get("问题数", 0) or 0)
+    net = float(m.get("净额", 0) or 0)
+    total = float(m.get("金额合计", 0) or 0)
+    level = m.get("可信等级", "需复核")
+    parts = [
+        f"当前数据可信度为 {trust}/100，系统判断为：{level}。",
+        f"本次记录数 {m.get('记录数', 0)}，金额合计 {total:,.2f}，净额 {net:,.2f}。",
+    ]
+    if issue_count > 0:
+        parts.append(f"系统发现 {issue_count} 条问题。建议先处理缺失字段、金额异常、状态缺失和高风险记录，再用于正式汇报。")
+    else:
+        parts.append("未发现明显字段或金额异常，可以作为初步经营分析依据。")
+    if result.get("template", {}).get("id") == "ecommerce_after_sales":
+        parts.append("电商售后场景建议重点关注：高退款商品、处理超时工单、退款原因集中度、客服响应时长和赔付金额。")
+    elif result.get("template", {}).get("id") == "higher_education_career":
+        parts.append("高校就业场景建议重点关注：未就业学生清单、专业/班级就业落实率、行业岗位匹配和薪资区间分布。")
+    else:
+        parts.append("建议下载报告包，与财务、运营或管理层共同复核后再进入下一步决策。")
+    parts.append("未来趋势判断：当前为规则型预测，请结合历史周期数据继续验证。若后续连续录入多期数据，系统可生成更稳定的趋势判断。")
+    return "\n".join(parts)
+
+
+def generate_ai_business_analysis(result: Optional[Dict[str, Any]], user_question: str = "") -> str:
+    sys = "你是OrbiRetail奥比零售云的企业经营分析AI。请基于用户上传的数据摘要，给出当前状况、风险、未来趋势和可执行建议。不要虚构未提供的数据。输出中文，结构清晰。"
+    prompt = result_brief_for_ai(result) + "\n\n用户问题：" + (user_question or "请分析当前状况，并预测未来趋势，提出建议。")
+    ans, status = call_chat_completion(sys, prompt, temperature=0.2, max_tokens=1000)
+    return ans or (fallback_business_insight(result) + f"\n\n（{status}）")
+
+
+def generate_ai_field_mapping(result: Optional[Dict[str, Any]]) -> str:
+    if not result:
+        return "请先上传数据或启动样例体验，AI 才能根据列名生成字段映射建议。"
+    cols = list(result.get("raw", pd.DataFrame()).columns)
+    template = result.get("template", {})
+    current = result.get("field_detection")
+    prompt = "模板要求：" + json.dumps({"name": template.get("name"), "required": template.get("required"), "group_by": template.get("group_by")}, ensure_ascii=False) + "\n上传列名：" + json.dumps([str(c) for c in cols], ensure_ascii=False)
+    if isinstance(current, pd.DataFrame):
+        prompt += "\n当前识别：" + current.to_json(orient="records", force_ascii=False)
+    sys = "你是字段映射助手。请把用户上传的列名映射到标准字段，并指出缺失字段、冲突字段和建议修改列名。输出表格化中文说明。"
+    ans, status = call_chat_completion(sys, prompt, temperature=0.1, max_tokens=900)
+    if ans:
+        return ans
+    missing = []
+    for f in template.get("required", []):
+        if not find_field(cols, f):
+            missing.append(f)
+    return "字段映射建议：\n" + "\n".join([f"- `{c}`：请根据模板说明确认是否可映射为标准字段。" for c in cols[:20]]) + (f"\n缺失必需字段：{', '.join(missing)}" if missing else "\n必需字段基本完整。") + f"\n\n（{status}）"
+
+
+def generate_ai_anomaly_explanation(result: Optional[Dict[str, Any]]) -> str:
+    if not result:
+        return "请先运行分析，AI 才能解释异常问题。"
+    issues = result.get("issues")
+    if not isinstance(issues, pd.DataFrame) or issues.empty:
+        return "当前没有明显异常。建议继续关注数据可信度、金额口径和上传文件来源是否完整。"
+    prompt = "问题清单：" + issues.head(80).to_json(orient="records", force_ascii=False) + "\n请解释这些异常可能产生的原因、影响和处理顺序。"
+    sys = "你是数据质检与业务异常解释助手。请把技术问题翻译成业务人员能理解的原因、影响和处理动作。"
+    ans, status = call_chat_completion(sys, prompt, temperature=0.15, max_tokens=900)
+    if ans:
+        return ans
+    by_type = issues["问题类型"].value_counts().to_dict() if "问题类型" in issues.columns else {}
+    return "异常解释：\n" + "\n".join([f"- {k}：{v} 条。建议优先复核相关列名、金额格式和必填值。" for k, v in by_type.items()]) + f"\n\n（{status}）"
+
+
+def generate_ai_customer_reply(result: Optional[Dict[str, Any]], tone: str = "专业友好") -> str:
+    prompt = result_brief_for_ai(result) + f"\n请生成一段{tone}的客服回复，说明分析结果、问题和下一步建议。"
+    sys = "你是SaaS产品客服与客户成功顾问。请输出简洁、专业、可直接发送给客户的中文回复。"
+    ans, status = call_chat_completion(sys, prompt, temperature=0.35, max_tokens=700)
+    if ans:
+        return ans
+    return "您好，系统已完成本次数据分析。建议您先查看经营指标、数据可信度和问题清单，再下载报告包用于内部复核。如字段识别或结果有疑问，请把上传文件列名、模板名称和问题截图发送给我们，我们会协助定位。" + f"\n\n（{status}）"
+
+
+def generate_ai_report_config(result: Optional[Dict[str, Any]]) -> str:
+    if not result:
+        return "请先运行一次分析，系统会根据当前场景生成报告配置建议。"
+    template = result.get("template", {})
+    base = {
+        "报告标题": f"{template.get('name', '经营分析')}报告",
+        "建议章节": ["核心指标", "数据可信度", "汇总结果", "异常问题", "AI经营摘要", "建议动作", "附录：原始数据"],
+        "重点图表": ["趋势图", "Top5排行", "原因分布", "问题类型分布"],
+        "下载内容": ["Excel分析报告", "问题清单CSV", "经营摘要TXT", "报告包ZIP"],
+    }
+    if template.get("id") == "ecommerce_after_sales":
+        base["建议章节"] = ["售后概览", "退款原因分布", "商品售后表现", "客服效率", "高风险工单", "整改建议"]
+    elif template.get("id") == "higher_education_career":
+        base["建议章节"] = ["院系就业概览", "专业/班级就业率", "实习单位分布", "岗位行业分布", "薪资区间", "未就业帮扶清单", "AI分析摘要"]
+    prompt = json.dumps(base, ensure_ascii=False) + "\n请把它整理成一份更适合业务汇报的报告配置。"
+    sys = "你是报表配置专家。请输出适合当前业务场景的报告标题、章节顺序、图表建议、下载文件建议和展示重点。"
+    ans, status = call_chat_completion(sys, prompt, temperature=0.2, max_tokens=850)
+    return ans or (json.dumps(base, ensure_ascii=False, indent=2) + f"\n\n（{status}）")
+
+
+def recommend_template_by_text(text: str) -> Dict[str, Any]:
+    lower = (text or "").lower()
+    scores = []
+    for t in TEMPLATES:
+        words = " ".join([t.get("name", ""), t.get("category", ""), t.get("target", ""), t.get("input", ""), t.get("output", ""), t.get("desc", "")]).lower()
+        score = 0
+        for token in re.findall(r"[\u4e00-\u9fffA-Za-z0-9]+", lower):
+            if token and token in words:
+                score += 2 if len(token) >= 2 else 1
+        scores.append((score, t))
+    scores.sort(key=lambda x: x[0], reverse=True)
+    return scores[0][1] if scores else TEMPLATES[0]
+
+
+def parse_rubric_criteria(rubric: str, assignment_type: str = "") -> pd.DataFrame:
+    text = rubric or "结构完整20分，内容准确30分，分析深入30分，表达规范20分。"
+    parts = re.split(r"[;；\n]+", text)
+    rows = []
+    for i, part in enumerate(parts):
+        part = part.strip(" ，,。\t")
+        if not part:
+            continue
+        m = re.search(r"(\d+(?:\.\d+)?)\s*分", part)
+        score = float(m.group(1)) if m else None
+        name = re.sub(r"\d+(?:\.\d+)?\s*分", "", part).strip(" ：:") or f"评分项{i+1}"
+        rows.append({"评分项": name[:40], "分值": score if score is not None else "未标注", "说明": part})
+    if not rows:
+        rows = [{"评分项": "内容质量", "分值": "未标注", "说明": text[:120]}]
+    return pd.DataFrame(rows)
+
+
+def growth_profiles_dataframe(company_id: int) -> pd.DataFrame:
+    conn = db()
+    rows = conn.execute("SELECT student_name, score, level, similarity_flag, praise_or_warning, created_at FROM assignment_history WHERE company_id=? ORDER BY created_at", (company_id,)).fetchall()
+    conn.close()
+    if not rows:
+        return pd.DataFrame(columns=["学生", "批改次数", "平均分", "最高分", "最低分", "高分次数", "低分次数", "成长趋势", "画像标签"])
+    df = pd.DataFrame([dict(r) for r in rows])
+    out = []
+    for stu, g in df.groupby("student_name"):
+        scores = g["score"].astype(float).tolist()
+        trend = "稳定"
+        if len(scores) >= 2:
+            diff = scores[-1] - scores[0]
+            if diff >= 8:
+                trend = "明显进步"
+            elif diff <= -8:
+                trend = "明显下滑"
+        tag = "正常"
+        avg = sum(scores) / len(scores)
+        if avg >= 85 and len(scores) >= 2:
+            tag = "持续优秀，建议表扬"
+        elif avg < 65 and len(scores) >= 2:
+            tag = "持续低分，建议重点辅导"
+        elif trend == "明显进步":
+            tag = "进步明显，建议正向激励"
+        out.append({"学生": stu, "批改次数": len(scores), "平均分": round(avg, 1), "最高分": max(scores), "最低分": min(scores), "高分次数": sum(s >= 85 for s in scores), "低分次数": sum(s < 60 for s in scores), "成长趋势": trend, "画像标签": tag})
+    return pd.DataFrame(out).sort_values(["低分次数", "平均分"], ascending=[False, True])
+
+
+def grading_trend_dataframe(company_id: int) -> pd.DataFrame:
+    conn = db()
+    rows = conn.execute("SELECT assignment_title, assignment_type, score, created_at FROM assignment_history WHERE company_id=?", (company_id,)).fetchall()
+    conn.close()
+    if not rows:
+        return pd.DataFrame(columns=["日期", "作业类型", "批改数", "平均分", "低分数"])
+    df = pd.DataFrame([dict(r) for r in rows])
+    df["日期"] = pd.to_datetime(df["created_at"], errors="coerce").dt.date.astype(str)
+    return df.groupby(["日期", "assignment_type"], dropna=False).agg(批改数=("score", "count"), 平均分=("score", "mean"), 低分数=("score", lambda s: int((pd.Series(s).astype(float) < 60).sum()))).reset_index().rename(columns={"assignment_type": "作业类型"})
+
+
+def class_risk_dataframe(company_id: int) -> pd.DataFrame:
+    profiles = growth_profiles_dataframe(company_id)
+    if profiles.empty:
+        return pd.DataFrame(columns=["风险类型", "学生", "风险说明", "建议动作"])
+    rows = []
+    for _, r in profiles.iterrows():
+        if str(r.get("画像标签", "")).startswith("持续低分"):
+            rows.append({"风险类型": "持续低分", "学生": r["学生"], "风险说明": f"平均分 {r['平均分']}，低分次数 {r['低分次数']}。", "建议动作": "建议教师单独反馈学习方法，安排补交/重做或辅导。"})
+        elif r.get("成长趋势") == "明显下滑":
+            rows.append({"风险类型": "成绩下滑", "学生": r["学生"], "风险说明": "近期分数较首次批改明显下降。", "建议动作": "建议查看最近作业主题、出勤和提交质量。"})
+    return pd.DataFrame(rows) if rows else pd.DataFrame([{"风险类型": "暂无明显风险", "学生": "", "风险说明": "当前历史记录未发现连续低分或明显下滑学生。", "建议动作": "继续积累批改记录，定期查看趋势。"}])
+
+
+def generate_teacher_comment(row: Dict[str, Any], rubric: str = "") -> str:
+    prompt = "学生作业批改结果：" + json.dumps(row, ensure_ascii=False) + "\n评分标准：" + (rubric or "未提供") + "\n请生成教师可直接使用的评语，包含优点、问题和下一步建议。"
+    sys = "你是高校教师助教AI。请生成温和、具体、可执行的中文作业评语，不要过度夸大，不要给出无法验证的事实。"
+    ans, status = call_chat_completion(sys, prompt, temperature=0.35, max_tokens=550)
+    if ans:
+        return ans
+    return f"该同学本次作业得分为 {row.get('得分', '')}，等级为 {row.get('等级', '')}。总体完成了基本要求，但仍建议结合评分标准进一步完善结构、论据和表达规范。请重点查看批改意见中的不足，并在下次作业中改进。\n\n（{status}）"
+
 def ai_agent_reply(message: str, user: sqlite3.Row, company: sqlite3.Row) -> str:
-    msg = (message or "").strip().lower()
+    msg_raw = (message or "").strip()
+    msg = msg_raw.lower()
+    current_result = st.session_state.get("analysis_result")
+    # 智能动作：基于当前分析结果做解释、预测、摘要和配置建议。
+    if any(k in msg for k in ["当前状况", "怎么样", "好不好", "经营情况", "现状", "预测", "未来", "建议", "利润", "亏损"]):
+        return generate_ai_business_analysis(current_result, msg_raw)
+    if any(k in msg for k in ["字段映射", "列名", "识别字段", "缺字段", "映射建议"]):
+        return generate_ai_field_mapping(current_result)
+    if any(k in msg for k in ["异常", "为什么", "解释问题", "报错原因", "问题清单"]):
+        return generate_ai_anomaly_explanation(current_result)
+    if any(k in msg for k in ["客服回复", "回复客户", "怎么跟客户说", "售后回复"]):
+        return generate_ai_customer_reply(current_result)
+    if any(k in msg for k in ["报告配置", "报告怎么做", "生成报告配置", "章节"]):
+        return generate_ai_report_config(current_result)
+    if any(k in msg for k in ["就业数据", "就业率", "实习", "未就业", "院系", "班级就业"]):
+        # 如果已有高校分析结果，则优先基于数据问答；否则推荐模板。
+        if current_result and current_result.get("template", {}).get("id") == "higher_education_career":
+            return generate_ai_business_analysis(current_result, msg_raw)
     tpl_map = {
         "ecommerce_after_sales": ["电商", "退款", "售后", "退货", "换货", "工单", "客服", "投诉", "赔付"],
         "retail_daily": ["门店", "渠道", "日报", "零售", "销售日报"],
@@ -1542,6 +2131,7 @@ def ai_agent_reply(message: str, user: sqlite3.Row, company: sqlite3.Row) -> str
         "sales_performance": ["销售", "业绩", "区域", "排名"],
         "payroll_check": ["考勤", "工资", "请假", "人事"],
         "supplier_recon": ["供应商", "采购", "发票", "付款"],
+        "higher_education_career": ["高校", "教务", "实习", "就业", "院系", "学生", "专业", "班级", "薪资", "未就业"],
     }
     for tid, kws in tpl_map.items():
         if any(k in msg for k in kws):
@@ -1564,30 +2154,42 @@ def ai_agent_reply(message: str, user: sqlite3.Row, company: sqlite3.Row) -> str
         return "分析完成后，在“报告下载区”可以下载 Excel 分析报告、问题清单 CSV、经营摘要 TXT 和报告包 ZIP。问题清单适合发给提交数据的人进行修改。"
     if any(k in msg for k in ["付费", "会员", "价格", "套餐"]):
         return f"当前产品主张高性价比：免费版可长期轻量使用；会员版 ¥{MEMBER_PRICE_MONTH}/月或 ¥{MEMBER_PRICE_YEAR}/年，解锁批量上传、全部模板、报告包、团队协作、API 和手机报告。"
+    if any(k in msg for k in ["批改", "作业", "评分", "论文", "雷同", "抄袭", "查重", "评语"]):
+        return "你可以进入【AI作业批改】页，上传 Word / PDF / TXT / ZIP 作业包，并输入或上传评分细则。Batch 44 支持真实大模型深度评语、评分标准解析、学生成长画像、班级风险预警和一键生成教师评语。"
     if any(k in msg for k in ["客服", "联系", "报错", "闪退", "失败", "问题"]):
         return f"如果页面报错或结果异常，请先截图并记录使用的模板、上传文件列名和操作步骤。也可以直接联系：{CONTACT_EMAIL}。我会优先建议你下载问题清单和报告包，便于定位。"
-    if any(k in msg for k in ["高校", "实习", "就业", "教务"]):
-        return "高校教务/实习/就业数据汇总属于下一批可扩展场景。我建议先准备字段：学院、专业、班级、学生、实习单位、岗位、就业状态、薪资、地区、行业。后续可以生成学院就业率、岗位分布、实习完成情况和院系汇总报告。"
-    return "我可以帮你选择模板、解释字段、指导上传、查看问题清单、下载报告，也可以作为客服记录你的问题。你可以直接描述：例如“我要分析电商退款售后工单”或“我要做库存盘点差异”。"
-
+    # 如果配置了真实大模型，把未命中的问题交给大模型回答；否则使用规则答案。
+    if ai_provider_ready():
+        sys = "你是OrbiRetail奥比零售云的AI Agent，负责产品客服、模板推荐、数据分析解释和教育场景助手。请基于产品能力回答，不要承诺无法完成的功能。"
+        prompt = "产品能力包括：零售/电商/财务/库存/人事/高校就业数据分析、AI作业批改、字段映射、问题清单、经营摘要、报告包下载、会员版。用户问题：" + msg_raw
+        ans, _ = call_chat_completion(sys, prompt, temperature=0.25, max_tokens=800)
+        if ans:
+            return ans
+    rec = recommend_template_by_text(msg_raw)
+    return f"我可以帮你选择模板、解释字段、指导上传、分析当前结果、预测趋势、生成报告配置，也可以作为客服记录问题。根据你的描述，我初步推荐【{rec['name']}】模板。你也可以直接告诉我：要分析什么文件、希望输出什么报告。"
 
 def render_ai_agent(user: sqlite3.Row, company: sqlite3.Row) -> None:
     st.markdown(
         """
         <div class='ai-agent-box'>
           <div class='ai-agent-title'>🤖 OrbiRetail AI Agent 智能助手</div>
-          <div class='orbi-muted'>告诉我你要解决的问题。我会自动推荐模板、说明上传字段、提示下一步操作，并作为客服入口记录你的问题。</div>
-          <span class='ai-agent-chip'>模板推荐</span><span class='ai-agent-chip'>上传指导</span><span class='ai-agent-chip'>经营诊断</span><span class='ai-agent-chip'>客服答疑</span>
+          <div class='orbi-muted'>告诉我你要解决的问题。我可以推荐模板、解释异常、生成经营摘要、预测趋势、生成客服回复，并在配置 API Key 后调用真实大模型。</div>
+          <span class='ai-agent-chip'>模板推荐</span><span class='ai-agent-chip'>字段映射</span><span class='ai-agent-chip'>异常解释</span><span class='ai-agent-chip'>趋势预测</span><span class='ai-agent-chip'>客服回复</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    cfg = get_ai_runtime_config()
+    status_text = "本地规则模式" if cfg.get("provider") == "rules" else f"{cfg.get('label')} · 模型 {cfg.get('model')}"
+    if cfg.get("provider") != "rules" and not cfg.get("api_key"):
+        status_text += " · 未配置 API Key"
+    st.caption(f"AI 当前模式：{status_text}")
     quick_cols = st.columns(4)
     quick_prompts = [
-        "我要分析电商退款和售后工单",
-        "我不知道应该选哪个模板",
-        "上传 Excel 有哪些字段要求",
-        "怎么下载问题清单和报告包",
+        "根据当前数据分析经营状况并预测未来",
+        "生成字段映射建议",
+        "解释问题清单里的异常",
+        "我要批改学生作业并生成教师评语",
     ]
     for i, prompt in enumerate(quick_prompts):
         with quick_cols[i]:
@@ -1596,7 +2198,7 @@ def render_ai_agent(user: sqlite3.Row, company: sqlite3.Row) -> None:
                 st.session_state["ai_last_answer"] = ai_agent_reply(prompt, user, company)
                 st.rerun()
     with st.form("ai_agent_form", clear_on_submit=False):
-        msg = st.text_input("向 AI Agent 发送需求或问题", value=st.session_state.get("ai_input_text", ""), placeholder="例如：我要汇总电商退货退款、售后工单和客服处理效率", key="ai_input_box")
+        msg = st.text_input("向 AI Agent 发送需求或问题", value=st.session_state.get("ai_input_text", ""), placeholder="例如：分析当前店铺状况、预测未来趋势、生成客服回复、解析评分标准", key="ai_input_box")
         submitted = st.form_submit_button("发送给 AI Agent", use_container_width=True)
         if submitted:
             st.session_state["ai_input_text"] = msg
@@ -1604,6 +2206,82 @@ def render_ai_agent(user: sqlite3.Row, company: sqlite3.Row) -> None:
     if st.session_state.get("ai_last_answer"):
         st.markdown(f"<div class='ai-answer'>{st.session_state['ai_last_answer']}</div>", unsafe_allow_html=True)
 
+
+def render_ai_intelligence_center(user: sqlite3.Row, company: sqlite3.Row) -> None:
+    st.markdown("<div class='orbi-section-title'>AI 智能中心</div>", unsafe_allow_html=True)
+    st.markdown("<div class='orbi-section-subtitle'>配置真实大模型 API，并对当前分析结果进行深度问答、趋势预测、字段映射、异常解释和报告配置生成。</div>", unsafe_allow_html=True)
+    cfg = get_ai_runtime_config()
+    with st.expander("AI 接入配置（OpenAI / 通义千问 / 智谱 / DeepSeek）", expanded=True):
+        provider_options = {"rules": "本地规则模式（无需API Key）", "openai": "OpenAI", "qwen": "通义千问 / 阿里云百炼", "zhipu": "智谱 GLM", "deepseek": "DeepSeek"}
+        current_provider = str(st.session_state.get("AI_PROVIDER", _secret_or_env("ORBI_AI_PROVIDER", "rules"))).lower()
+        if current_provider not in provider_options:
+            current_provider = "rules"
+        provider = st.selectbox("AI 提供商", list(provider_options.keys()), index=list(provider_options.keys()).index(current_provider), format_func=lambda x: provider_options[x], key="AI_PROVIDER_SELECT")
+        st.session_state["AI_PROVIDER"] = provider
+        if provider != "rules":
+            defaults = AI_PROVIDER_DEFAULTS[provider]
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                api_key = st.text_input("API Key（仅本次会话临时保存；正式部署建议放到 Streamlit Secrets）", value=st.session_state.get(defaults["key_env"], ""), type="password", key=f"{provider}_api_key_input")
+                if api_key:
+                    st.session_state[defaults["key_env"]] = api_key
+            with c2:
+                model = st.text_input("模型名称", value=_secret_or_env(f"{provider.upper()}_MODEL", defaults["model"]), key=f"{provider}_model_input")
+                st.session_state[f"{provider.upper()}_MODEL"] = model
+            base_url = st.text_input("Base URL", value=_secret_or_env(f"{provider.upper()}_BASE_URL", defaults["base_url"]), key=f"{provider}_base_url_input")
+            st.session_state[f"{provider.upper()}_BASE_URL"] = base_url
+            st.caption("提示：通义千问、智谱和 DeepSeek 均按 OpenAI 兼容 Chat Completions 格式预留接入。")
+        else:
+            st.info("当前使用本地规则模式，所有 AI 功能会以可控规则输出，不调用外部大模型。")
+    result = st.session_state.get("analysis_result")
+    if not result:
+        st.warning("当前还没有分析结果。建议先在工作台点击样例体验或上传数据，再使用 AI 智能分析。")
+    else:
+        st.markdown("#### 基于当前分析结果的一键 AI 能力")
+        cols = st.columns(3)
+        actions = [
+            ("ai_business_summary", "生成经营摘要 / 当前状况分析", lambda: generate_ai_business_analysis(result)),
+            ("ai_future_prediction", "预测未来趋势并给出建议", lambda: generate_ai_business_analysis(result, "请重点预测未来趋势和风险，并提出下一步建议。")),
+            ("ai_field_mapping", "生成字段映射建议", lambda: generate_ai_field_mapping(result)),
+            ("ai_anomaly_explain", "解释异常问题", lambda: generate_ai_anomaly_explanation(result)),
+            ("ai_customer_reply", "生成客服回复草稿", lambda: generate_ai_customer_reply(result)),
+            ("ai_report_config", "生成报告配置建议", lambda: generate_ai_report_config(result)),
+        ]
+        for i, (key, label, fn) in enumerate(actions):
+            with cols[i % 3]:
+                if st.button(label, key=key, use_container_width=True):
+                    st.session_state[f"{key}_answer"] = fn()
+        for key, label, _ in actions:
+            val = st.session_state.get(f"{key}_answer")
+            if val:
+                with st.expander(label, expanded=True):
+                    st.markdown(f"<div class='ai-answer'>{val}</div>", unsafe_allow_html=True)
+        st.markdown("#### AI 问答")
+        q = st.text_area("围绕当前数据提问", placeholder="例如：哪个店铺风险最大？为什么退款金额偏高？高校哪个专业就业率需要重点关注？", height=100, key="ai_data_question")
+        if st.button("向 AI 提问", key="ask_ai_about_data", use_container_width=True):
+            st.session_state["ai_data_answer"] = generate_ai_business_analysis(result, q)
+        if st.session_state.get("ai_data_answer"):
+            st.markdown(f"<div class='ai-answer'>{st.session_state['ai_data_answer']}</div>", unsafe_allow_html=True)
+    st.markdown("#### 教育场景智能化")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("班级学习风险预警", key="ai_class_risk_btn", use_container_width=True):
+            st.session_state["ai_class_risk_df"] = class_risk_dataframe(company["id"])
+    with c2:
+        if st.button("学生成长画像", key="ai_growth_profile_btn", use_container_width=True):
+            st.session_state["ai_growth_df"] = growth_profiles_dataframe(company["id"])
+    with c3:
+        if st.button("作业批改历史趋势", key="ai_grading_trend_btn", use_container_width=True):
+            st.session_state["ai_trend_df"] = grading_trend_dataframe(company["id"])
+    if st.session_state.get("ai_class_risk_df") is not None:
+        with st.expander("班级学习风险预警", expanded=True):
+            st.dataframe(st.session_state["ai_class_risk_df"], use_container_width=True)
+    if st.session_state.get("ai_growth_df") is not None:
+        with st.expander("学生成长画像", expanded=True):
+            st.dataframe(st.session_state["ai_growth_df"], use_container_width=True)
+    if st.session_state.get("ai_trend_df") is not None:
+        with st.expander("作业批改历史趋势", expanded=True):
+            st.dataframe(st.session_state["ai_trend_df"], use_container_width=True)
 
 def render_workbench(user: sqlite3.Row, company: sqlite3.Row) -> None:
     if not company_access_allowed(company):
@@ -1659,6 +2337,283 @@ def render_workbench(user: sqlite3.Row, company: sqlite3.Row) -> None:
     result = st.session_state.get("analysis_result")
     if result:
         render_result(user, company, result)
+
+
+# -----------------------------------------------------------------------------
+# AI assignment grading helpers
+# -----------------------------------------------------------------------------
+def _simple_tokens(text: str) -> set:
+    words = re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z0-9_]{3,}", text.lower())
+    return set(words)
+
+
+def _safe_read_text_file(uploaded: Any) -> str:
+    data = uploaded.getvalue()
+    name = getattr(uploaded, "name", "").lower()
+    if name.endswith(".txt"):
+        return data.decode("utf-8", errors="ignore")
+    if name.endswith(".docx"):
+        try:
+            from docx import Document
+            doc = Document(io.BytesIO(data))
+            return "\n".join(p.text for p in doc.paragraphs)
+        except Exception as exc:
+            return f"[DOCX 解析失败：{exc}]"
+    if name.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(data))
+            texts = []
+            for page in reader.pages[:80]:
+                texts.append(page.extract_text() or "")
+            return "\n".join(texts)
+        except Exception as exc:
+            return f"[PDF 解析失败：{exc}]"
+    return data.decode("utf-8", errors="ignore")
+
+
+def extract_assignment_submissions(files: List[Any]) -> List[Dict[str, Any]]:
+    submissions: List[Dict[str, Any]] = []
+    for f in files:
+        name = getattr(f, "name", "uploaded")
+        lower = name.lower()
+        if lower.endswith(".zip"):
+            try:
+                z = zipfile.ZipFile(io.BytesIO(f.getvalue()))
+                for member in z.namelist():
+                    if member.startswith("__MACOSX/") or member.endswith("/"):
+                        continue
+                    if not member.lower().endswith((".docx", ".pdf", ".txt")):
+                        continue
+                    raw = z.read(member)
+                    fake = type("UploadedLike", (), {"name": Path(member).name, "getvalue": lambda self, raw=raw: raw})()
+                    text = _safe_read_text_file(fake)
+                    student = Path(member).stem.split("_")[0].split("-")[0].strip() or Path(member).stem
+                    submissions.append({"文件名": member, "学生": student, "文本": text, "字数": len(text)})
+            except Exception as exc:
+                submissions.append({"文件名": name, "学生": Path(name).stem, "文本": f"[ZIP 解析失败：{exc}]", "字数": 0})
+        else:
+            text = _safe_read_text_file(f)
+            student = Path(name).stem.split("_")[0].split("-")[0].strip() or Path(name).stem
+            submissions.append({"文件名": name, "学生": student, "文本": text, "字数": len(text)})
+    return submissions
+
+
+def rubric_keywords(rubric: str, assignment_type: str) -> List[str]:
+    base = ["结构", "观点", "论证", "案例", "数据", "反思", "结论"]
+    type_map = {
+        "课程论文": ["摘要", "文献", "引用", "研究", "分析", "结论"],
+        "实习报告": ["单位", "岗位", "任务", "收获", "问题", "改进"],
+        "实验报告": ["目的", "步骤", "数据", "结果", "分析", "误差"],
+        "读书报告": ["作者", "主题", "观点", "摘录", "感悟", "评价"],
+        "代码说明文档": ["需求", "设计", "接口", "测试", "异常", "部署"],
+    }
+    text_words = re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z0-9_]{3,}", rubric)
+    words = base + type_map.get(assignment_type, []) + text_words[:40]
+    # 去重但保持顺序
+    seen, out = set(), []
+    for w in words:
+        if w not in seen:
+            seen.add(w); out.append(w)
+    return out
+
+
+def compute_similarity(submissions: List[Dict[str, Any]]) -> Dict[Tuple[int, int], float]:
+    sims: Dict[Tuple[int, int], float] = {}
+    token_sets = [_simple_tokens(s.get("文本", "")) for s in submissions]
+    for i in range(len(submissions)):
+        for j in range(i + 1, len(submissions)):
+            a, b = token_sets[i], token_sets[j]
+            if not a or not b:
+                sims[(i, j)] = 0.0
+            else:
+                sims[(i, j)] = len(a & b) / max(1, len(a | b))
+    return sims
+
+
+def grade_submission_text(text: str, rubric: str, assignment_type: str, max_score: int, use_llm: bool = False) -> Tuple[float, str, str, str]:
+    kws = rubric_keywords(rubric, assignment_type)
+    text_l = text.lower()
+    keyword_hits = sum(1 for k in kws if str(k).lower() in text_l)
+    length = len(text.strip())
+    length_score = min(30, length / 40)  # 1200字左右接近满分
+    keyword_score = min(35, keyword_hits / max(6, len(kws) * 0.35) * 35)
+    structure_hits = sum(1 for k in ["一、", "二、", "三、", "1.", "2.", "结论", "总结", "参考", "反思"] if k in text)
+    structure_score = min(20, structure_hits * 4)
+    clarity_score = 15 if len(set(text.strip())) > 60 else 8
+    raw = length_score + keyword_score + structure_score + clarity_score
+    score = round(max(0, min(max_score, raw / 100 * max_score)), 1)
+    if score >= max_score * 0.85:
+        level = "优秀"
+    elif score >= max_score * 0.70:
+        level = "良好"
+    elif score >= max_score * 0.60:
+        level = "合格"
+    else:
+        level = "需改进"
+    strengths = []
+    if keyword_hits >= 6:
+        strengths.append("覆盖了较多评分要点")
+    if structure_score >= 12:
+        strengths.append("结构较清晰")
+    if length_score >= 20:
+        strengths.append("内容较充实")
+    if not strengths:
+        strengths.append("已提交基本内容")
+    improvements = []
+    if keyword_hits < 5:
+        improvements.append("需补充评分细则中的关键要点")
+    if structure_score < 8:
+        improvements.append("建议增加标题层级、结论或反思段落")
+    if length_score < 15:
+        improvements.append("内容偏短，建议补充案例、数据或过程说明")
+    if not improvements:
+        improvements.append("可进一步提升论证深度和案例质量")
+    comment = f"等级：{level}。优点：{'；'.join(strengths)}。改进建议：{'；'.join(improvements)}。"
+    if use_llm and ai_provider_ready():
+        sys = "你是高校课程助教AI。请根据作业文本、评分细则和初评分生成深度评语，内容包括：优点、不足、可执行改进建议、是否需要教师重点复核。不要虚构引用和事实。"
+        prompt = f"作业类型：{assignment_type}\n满分：{max_score}\n初评分：{score}\n等级：{level}\n命中要点：{'、'.join(kws[:20])}\n评分细则：{rubric[:3000]}\n作业正文节选：{text[:6000]}"
+        ans, _status = call_chat_completion(sys, prompt, temperature=0.25, max_tokens=850)
+        if ans:
+            comment = ans.strip()
+    return score, level, comment, "、".join(kws[:12])
+
+def student_history_note(company_id: int, student: str, current_score: float, max_score: int) -> str:
+    conn = db()
+    rows = conn.execute("SELECT score, level, created_at FROM assignment_history WHERE company_id=? AND student_name=? ORDER BY id DESC LIMIT 8", (company_id, student)).fetchall()
+    conn.close()
+    if not rows:
+        return "首次记录"
+    high = sum(1 for r in rows if float(r["score"]) >= max_score * 0.85)
+    low = sum(1 for r in rows if float(r["score"]) < max_score * 0.60)
+    avg = sum(float(r["score"]) for r in rows) / len(rows)
+    if high >= 2 and current_score >= max_score * 0.80:
+        return f"表扬：该生历史表现稳定较好，近{len(rows)}次均分约 {avg:.1f}。"
+    if low >= 2 or current_score < max_score * 0.55:
+        return f"警告：该生存在连续低分风险，近{len(rows)}次均分约 {avg:.1f}，建议重点辅导。"
+    return f"历史参考：近{len(rows)}次均分约 {avg:.1f}。"
+
+
+def run_assignment_grading(user: sqlite3.Row, company: sqlite3.Row, files: List[Any], assignment_title: str, assignment_type: str, rubric: str, max_score: int, use_llm_comments: bool = False) -> Dict[str, Any]:
+    submissions = extract_assignment_submissions(files)
+    sims = compute_similarity(submissions)
+    similarity_flags = {i: [] for i in range(len(submissions))}
+    for (i, j), sim in sims.items():
+        if sim >= 0.72:
+            similarity_flags[i].append(f"与 {submissions[j]['学生']} 相似度 {sim:.2%}")
+            similarity_flags[j].append(f"与 {submissions[i]['学生']} 相似度 {sim:.2%}")
+    rows = []
+    conn = db()
+    for idx, sub in enumerate(submissions):
+        text = sub.get("文本", "")
+        score, level, comment, used_kws = grade_submission_text(text, rubric, assignment_type, max_score, use_llm_comments)
+        sim_flag = "；".join(similarity_flags.get(idx, [])) or "正常"
+        hist_note = student_history_note(company["id"], sub["学生"], score, max_score)
+        if sim_flag != "正常":
+            level = level + "（需查重复核）"
+        rows.append({
+            "学生": sub["学生"],
+            "文件名": sub["文件名"],
+            "作业类型": assignment_type,
+            "得分": score,
+            "等级": level,
+            "字数": sub.get("字数", 0),
+            "雷同抄袭标注": sim_flag,
+            "历史表现标注": hist_note,
+            "AI批改意见": comment,
+            "命中评分要点": used_kws,
+        })
+        conn.execute(
+            "INSERT INTO assignment_history(company_id,user_id,student_name,assignment_title,assignment_type,score,level,similarity_flag,praise_or_warning,created_at,feedback_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (company["id"], user["id"], sub["学生"], assignment_title, assignment_type, float(score), level, sim_flag, hist_note, now_iso(), json.dumps({"comment": comment, "keywords": used_kws, "llm": bool(use_llm_comments and ai_provider_ready())}, ensure_ascii=False)),
+        )
+    conn.commit(); conn.close()
+    result_df = pd.DataFrame(rows)
+    sim_rows = []
+    for (i, j), sim in sims.items():
+        sim_rows.append({"学生A": submissions[i]["学生"], "学生B": submissions[j]["学生"], "相似度": round(sim, 4), "标注": "疑似雷同" if sim >= 0.72 else "正常"})
+    sim_df = pd.DataFrame(sim_rows)
+    rubric_df = parse_rubric_criteria(rubric, assignment_type)
+    growth_df = growth_profiles_dataframe(company["id"])
+    trend_df = grading_trend_dataframe(company["id"])
+    risk_df = class_risk_dataframe(company["id"])
+    return {"results": result_df, "similarity": sim_df, "rubric": rubric, "rubric_df": rubric_df, "growth_profiles": growth_df, "grading_trends": trend_df, "class_risks": risk_df, "assignment_title": assignment_title, "assignment_type": assignment_type, "created_at": now_iso(), "llm_comments": bool(use_llm_comments and ai_provider_ready())}
+
+def make_assignment_report_excel(grading: Dict[str, Any]) -> bytes:
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        grading["results"].to_excel(writer, index=False, sheet_name="AI批改结果")
+        grading["similarity"].to_excel(writer, index=False, sheet_name="雷同抄袭检测")
+        grading.get("rubric_df", pd.DataFrame()).to_excel(writer, index=False, sheet_name="评分标准解析")
+        grading.get("growth_profiles", pd.DataFrame()).to_excel(writer, index=False, sheet_name="学生成长画像")
+        grading.get("grading_trends", pd.DataFrame()).to_excel(writer, index=False, sheet_name="批改历史趋势")
+        grading.get("class_risks", pd.DataFrame()).to_excel(writer, index=False, sheet_name="班级风险预警")
+        pd.DataFrame([{"作业标题": grading["assignment_title"], "作业类型": grading["assignment_type"], "生成时间": grading["created_at"], "是否启用真实大模型评语": grading.get("llm_comments", False), "评分细则": grading["rubric"][:3000]}]).to_excel(writer, index=False, sheet_name="评分设置")
+    return buf.getvalue()
+
+def render_assignment_grading_page(user: sqlite3.Row, company: sqlite3.Row) -> None:
+    st.markdown("<div class='orbi-section-title'>AI 作业批改</div>", unsafe_allow_html=True)
+    st.markdown("<div class='orbi-section-subtitle'>支持上传 Word / PDF / TXT / ZIP 作业包。Batch 44 新增真实大模型深度评语、评分标准自动解析、班级学习风险预警、学生成长画像和教师一键评语。</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='notice-box'><b>说明：</b>当前为规则增强型 AI 批改 MVP，适合初筛、统计和辅助批改。重要课程成绩仍建议教师复核。遇到问题请联系：{CONTACT_EMAIL}</div>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1.2, 1, 1])
+    with c1:
+        assignment_title = st.text_input("作业标题", value="课程作业", key="assign_title")
+    with c2:
+        assignment_type = st.selectbox("作业类型", ["通用文字作业", "课程论文", "实习报告", "实验报告", "读书报告", "代码说明文档"], key="assign_type")
+    with c3:
+        max_score = st.number_input("满分", min_value=10, max_value=150, value=100, step=5, key="assign_max")
+    rubric_text = st.text_area("评分标准细则（可直接输入）", placeholder="例如：结构完整20分，观点清晰20分，案例和数据30分，反思总结20分，格式规范10分。", height=140, key="assign_rubric")
+    rubric_file = st.file_uploader("也可以上传评分标准文件（Word/PDF/TXT）", type=["docx", "pdf", "txt"], key="rubric_file")
+    if rubric_file:
+        extra = _safe_read_text_file(rubric_file)
+        rubric_text = (rubric_text + "\n" + extra).strip()
+        st.success("已读取评分标准文件。")
+    rubric_preview = parse_rubric_criteria(rubric_text, assignment_type)
+    with st.expander("AI 评分标准自动解析预览", expanded=False):
+        st.dataframe(rubric_preview, use_container_width=True)
+    use_llm_comments = st.checkbox("启用真实大模型深度评语（需要在 AI 智能中心配置 API Key）", value=False, key="assign_use_llm_comments")
+    files = st.file_uploader("上传学生作业（可多选 Word/PDF/TXT，也可上传 ZIP 作业包）", type=["docx", "pdf", "txt", "zip"], accept_multiple_files=True, key="assignment_files")
+    if st.button("开始 AI 批改作业", key="run_assignment_grading", use_container_width=True):
+        if not files:
+            st.error("请先上传学生作业文件。")
+        else:
+            rubric = rubric_text.strip() or "结构完整、内容准确、观点清晰、案例充分、反思到位、格式规范。"
+            try:
+                grading = run_assignment_grading(user, company, files, assignment_title, assignment_type, rubric, int(max_score), bool(use_llm_comments))
+                st.session_state["assignment_grading"] = grading
+                st.success("AI 批改已完成。")
+            except Exception as exc:
+                st.error(f"批改失败：{exc}")
+    grading = st.session_state.get("assignment_grading")
+    if grading:
+        results = grading["results"]
+        st.markdown("#### 批改结果汇总")
+        m1, m2, m3, m4 = st.columns(4)
+        with m1: st.metric("作业份数", len(results))
+        with m2: st.metric("平均分", round(float(results["得分"].mean()), 1) if not results.empty else 0)
+        with m3: st.metric("疑似雷同", int((results["雷同抄袭标注"] != "正常").sum()) if not results.empty else 0)
+        with m4: st.metric("需重点关注", int(results["历史表现标注"].astype(str).str.contains("警告").sum()) if not results.empty else 0)
+        st.dataframe(results, use_container_width=True)
+        with st.expander("雷同抄袭检测详情", expanded=False):
+            st.dataframe(grading["similarity"], use_container_width=True)
+        with st.expander("评分标准自动解析", expanded=False):
+            st.dataframe(grading.get("rubric_df", pd.DataFrame()), use_container_width=True)
+        with st.expander("学生成长画像", expanded=False):
+            st.dataframe(grading.get("growth_profiles", pd.DataFrame()), use_container_width=True)
+        with st.expander("班级学习风险预警", expanded=True):
+            st.dataframe(grading.get("class_risks", pd.DataFrame()), use_container_width=True)
+        with st.expander("作业批改历史趋势", expanded=False):
+            st.dataframe(grading.get("grading_trends", pd.DataFrame()), use_container_width=True)
+        if not results.empty:
+            st.markdown("#### 教师一键生成评语")
+            student_options = results["学生"].astype(str).tolist()
+            selected_student = st.selectbox("选择学生", student_options, key="teacher_comment_student")
+            selected_row = results[results["学生"].astype(str) == selected_student].iloc[0].to_dict()
+            if st.button("生成教师评语", key="generate_teacher_comment", use_container_width=True):
+                st.session_state["teacher_comment"] = generate_teacher_comment(selected_row, grading.get("rubric", ""))
+            if st.session_state.get("teacher_comment"):
+                st.markdown(f"<div class='ai-answer'>{st.session_state['teacher_comment']}</div>", unsafe_allow_html=True)
+        st.download_button("下载 AI 作业批改数据分析表格", data=make_assignment_report_excel(grading), file_name=f"OrbiRetail_AI作业批改_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_assignment_report", use_container_width=True)
 
 
 # -----------------------------------------------------------------------------
@@ -2172,11 +3127,12 @@ def render_home(user: sqlite3.Row, company: sqlite3.Row) -> None:
     st.markdown(
         """
         <div class='orbi-hero'>
-            <h1>商业版工作台：电商售后场景包 + AI Agent 智能助手。</h1>
-            <p>Batch 42 新增电商退换货/售后工单汇总场景包，并在工作台前置 AI Agent。用户可以直接描述需求，由 AI 推荐模板、解释字段、指导上传和充当客服入口。遇到无法解决的问题可联系 2790569814@qq.com。</p>
+            <h1>AI 驱动的经营分析与教育智能工作台。</h1>
+            <p>Batch 44 新增真实大模型接入预留，支持 OpenAI、通义千问、智谱、DeepSeek。AI 可以基于上传数据生成字段映射建议、异常解释、经营摘要、未来趋势预测、客服回复、报告配置，并增强高校作业批改、学生成长画像和班级风险预警。</p>
             <div class='orbi-pill-row'>
-                <span class='orbi-pill'>电商售后场景包</span>
-                <span class='orbi-pill'>AI Agent 智能助手</span>
+                <span class='orbi-pill'>真实大模型接入</span>
+                <span class='orbi-pill'>AI 作业批改增强</span>
+                <span class='orbi-pill'>经营预测与建议</span>
                 <span class='orbi-pill'>免费版 + 低价会员版</span>
                 <span class='orbi-pill'>角色权限</span>
                 <span class='orbi-pill'>数据库迁移方案</span>
@@ -2187,24 +3143,28 @@ def render_home(user: sqlite3.Row, company: sqlite3.Row) -> None:
         """,
         unsafe_allow_html=True,
     )
-    tabs = st.tabs(["工作台", "模板中心", "报告中心", "团队与权限", "订阅与支付", "API / 私有化", "手机报告", "管理员后台", "反馈"])
+    tabs = st.tabs(["工作台", "AI智能中心", "AI作业批改", "模板中心", "报告中心", "团队与权限", "订阅与支付", "API / 私有化", "手机报告", "管理员后台", "反馈"])
     with tabs[0]:
         render_workbench(user, company)
     with tabs[1]:
-        render_template_picker()
+        render_ai_intelligence_center(user, company)
     with tabs[2]:
-        render_reports_page(user, company)
+        render_assignment_grading_page(user, company)
     with tabs[3]:
-        render_team_page(user, company)
+        render_template_picker()
     with tabs[4]:
-        render_billing_page(user, company)
+        render_reports_page(user, company)
     with tabs[5]:
-        render_api_private_page(user, company)
+        render_team_page(user, company)
     with tabs[6]:
-        render_mobile_page(user, company)
+        render_billing_page(user, company)
     with tabs[7]:
-        render_admin_console(user, company)
+        render_api_private_page(user, company)
     with tabs[8]:
+        render_mobile_page(user, company)
+    with tabs[9]:
+        render_admin_console(user, company)
+    with tabs[10]:
         render_feedback_page(user, company)
 
 
