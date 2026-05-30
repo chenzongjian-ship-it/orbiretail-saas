@@ -1,7 +1,2 @@
 [server]
-# Streamlit 默认上传大小通常是 200MB。作业批改场景可能上传 ZIP 作业包，因此这里放宽到 500MB。
-# Streamlit Cloud 的实际限制仍可能受平台资源影响。正式商业版建议使用对象存储。
 maxUploadSize = 500
-
-[browser]
-gatherUsageStats = false
