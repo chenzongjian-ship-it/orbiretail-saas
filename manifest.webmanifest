@@ -1,7 +1,7 @@
 {
   "name": "Aurevia 智策云",
   "short_name": "智策云",
-  "description": "数据智能、AI分析、作业批改与报告生成平台",
+  "description": "AI 数据分析、报告生成、作业批改与成果分享平台",
   "start_url": "https://orbiretail-saas.streamlit.app/",
   "display": "standalone",
   "background_color": "#071225",

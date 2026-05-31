@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 APP_NAME = "Aurevia 智策云"
-APP_SUBTITLE = "数据智能与AI效率平台｜Batch 61 AI推荐策略与体验数据分析"
+APP_SUBTITLE = "数据智能与AI效率平台｜Batch 66 手机端完整优化版"
 CONTACT_EMAIL = "2790569814@qq.com"
 DATA_DIR = Path("saas_data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -115,6 +115,55 @@ header {visibility: visible !important; background: transparent !important;}
 .recommend-card {background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 65%, #0f766e 100%); color:white; border-radius:24px; padding:24px; box-shadow:0 18px 50px rgba(15,23,42,.18);}
 .recommend-card p { color: rgba(255,255,255,.90); }
 .chart-panel {background:#ffffff; border:1px solid #e5edf7; border-radius:20px; padding:18px; box-shadow:0 10px 26px rgba(15,23,42,.05);}
+
+
+.nav-section-title {
+  font-size: 12px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin: 10px 0 6px 0;
+}
+.footer-links {
+  margin-top: 34px;
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255,255,255,.72);
+  border: 1px solid rgba(15,23,42,.08);
+}
+.footer-links-title {font-size: 13px; color:#64748b; margin-bottom: 8px;}
+
+
+.mobile-hero-mini {
+  padding: 20px; border-radius: 22px;
+  background: linear-gradient(135deg,#0f172a 0%,#1e40af 62%,#0f766e 100%);
+  color:#fff; box-shadow:0 18px 46px rgba(15,23,42,.16); margin-bottom:14px;
+}
+.mobile-hero-mini h2 {font-size:28px; line-height:1.15; margin:0 0 8px 0;}
+.mobile-hero-mini p {font-size:15px; line-height:1.65; color:rgba(255,255,255,.9); margin:0;}
+.mobile-report-card {
+  border-radius: 20px; padding: 16px; background:#fff;
+  border:1px solid #e2e8f0; box-shadow:0 10px 26px rgba(15,23,42,.06);
+  margin-bottom: 12px;
+}
+.mobile-report-card .kpi {font-size:26px; font-weight:800; color:#0f172a; margin:4px 0;}
+.mobile-report-card .label {font-size:13px; color:#64748b;}
+.mobile-cta-row {display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 12px 0;}
+.mobile-cta {padding:8px 11px; border-radius:999px; background:#eef6ff; border:1px solid #bfdbfe; color:#1d4ed8; font-size:13px;}
+.share-card-preview {
+  border-radius:22px; padding:22px; color:#fff;
+  background:linear-gradient(135deg,#111827,#1d4ed8,#0f766e);
+  box-shadow:0 20px 50px rgba(15,23,42,.20); margin-bottom:14px;
+}
+.share-card-preview h3 {font-size:28px; margin:0 0 8px 0;}
+.share-card-preview p {font-size:15px; line-height:1.7; color:rgba(255,255,255,.92);}
+@media (max-width: 640px) {
+  .mobile-hero-mini h2 {font-size:24px;}
+  .mobile-report-card .kpi {font-size:24px;}
+  .share-card-preview h3 {font-size:24px;}
+  .stButton button {min-height: 44px;}
+  div[data-testid="stTextInput"] input, div[data-testid="stTextArea"] textarea {font-size:16px !important;}
+}
 
 </style>
 """,
@@ -220,6 +269,95 @@ def init_db():
         )
         """
     )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS feedback_tasks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_feedback_id INTEGER,
+          title TEXT,
+          category TEXT,
+          scenario TEXT,
+          priority_score INTEGER,
+          status TEXT DEFAULT '待处理',
+          ai_reason TEXT,
+          created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_demands (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_feedback_id INTEGER,
+          demand_type TEXT,
+          scenario TEXT,
+          description TEXT,
+          priority_score INTEGER,
+          created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iteration_plans (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT,
+          plan_text TEXT,
+          created_at TEXT
+        )
+        """
+    )
+
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS feedback_task_notes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id INTEGER,
+          note TEXT,
+          operator TEXT,
+          created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS feedback_task_status_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id INTEGER,
+          old_status TEXT,
+          new_status TEXT,
+          operator TEXT,
+          created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iteration_retrospectives (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          batch_name TEXT,
+          completed_items TEXT,
+          tests_summary TEXT,
+          issues_found TEXT,
+          next_actions TEXT,
+          created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS upload_error_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT,
+          file_name TEXT,
+          error_type TEXT,
+          error_message TEXT,
+          repair_suggestion TEXT,
+          created_at TEXT
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -317,6 +455,31 @@ FIELD_ALIASES = {
     "实际库存": ["实际库存", "盘点数量", "实盘数量"],
 }
 
+# Batch 63：更细的字段别名库，重点强化电商售后与高校就业场景
+FIELD_ALIASES.update({
+    "日期": FIELD_ALIASES.get("日期", []) + ["售后申请时间", "退款申请时间", "工单创建时间", "创建时间", "提交时间", "完结时间", "完成时间"],
+    "门店": FIELD_ALIASES.get("门店", []) + ["店铺名称", "店铺名", "网店", "门店编码", "商家名称"],
+    "渠道": FIELD_ALIASES.get("渠道", []) + ["平台名称", "销售平台", "售后渠道", "订单来源", "来源平台", "店铺渠道"],
+    "金额": FIELD_ALIASES.get("金额", []) + ["订单金额", "实付金额", "应收金额", "成交价", "支付总额", "结算金额"],
+    "退款金额": FIELD_ALIASES.get("退款金额", []) + ["退款金额(元)", "申请退款金额", "实际退款金额", "退赔金额", "售后退款金额", "退款/赔付金额", "退还金额"],
+    "订单号": FIELD_ALIASES.get("订单号", []) + ["订单编号", "售后编号", "售后工单号", "退款单号", "退货单号", "平台订单号", "子订单号", "主订单号"],
+    "商品": FIELD_ALIASES.get("商品", []) + ["商品标题", "商品编码", "SKU编码", "SKU名称", "货品名称", "产品名称", "商品ID", "款号"],
+    "售后类型": FIELD_ALIASES.get("售后类型", []) + ["售后类别", "退款类型", "退货类型", "服务类型", "问题类型", "业务类型"],
+    "退款原因": FIELD_ALIASES.get("退款原因", []) + ["原因", "退换原因", "申请原因", "问题原因", "客户反馈原因", "投诉类型", "售后备注"],
+    "处理状态": FIELD_ALIASES.get("处理状态", []) + ["状态", "退款状态", "售后处理状态", "工单处理状态", "是否完结", "完结状态", "当前状态"],
+    "客服": ["客服", "客服人员", "处理人", "处理客服", "跟进人", "售后专员", "负责人"],
+    "处理时长": ["处理时长", "处理小时", "完成时长", "工单时长", "售后时长", "处理耗时", "完结耗时"],
+    "响应时长": ["响应时长", "首次响应时长", "首响时长", "响应耗时", "首次回复时长"],
+    "赔付金额": ["赔付金额", "补偿金额", "补贴金额", "平台补贴", "商家赔付", "赔偿金额"],
+    "学院": FIELD_ALIASES.get("学院", []) + ["学校", "分院", "学院名称", "院部"],
+    "就业状态": FIELD_ALIASES.get("就业状态", []) + ["落实状态", "毕业落实去向", "去向类型", "当前去向", "就业落实情况", "是否落实"],
+    "实习单位": ["实习单位", "实习企业", "实习公司", "实践单位", "单位名称", "企业名称"],
+    "就业单位": ["就业单位", "签约单位", "录用单位", "工作单位", "入职单位", "用人单位"],
+    "岗位": ["岗位", "职位", "岗位名称", "就业岗位", "实习岗位", "职务"],
+    "行业": ["行业", "就业行业", "单位行业", "所属行业", "行业类别"],
+    "地区": ["地区", "城市", "就业地区", "工作地点", "单位所在地", "省市"],
+})
+
 # ----------------------------
 # Utilities
 # ----------------------------
@@ -339,18 +502,8 @@ def map_fields(df: pd.DataFrame, required: List[str]) -> pd.DataFrame:
 
 
 def read_uploaded_files(files: List[Any]) -> pd.DataFrame:
-    frames = []
-    for f in files:
-        try:
-            if f.name.lower().endswith(".csv"):
-                df = pd.read_csv(f)
-            else:
-                df = pd.read_excel(f)
-            df["来源文件"] = f.name
-            frames.append(df)
-        except Exception as e:
-            st.warning(f"文件 {f.name} 读取失败：{e}")
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    data, _, _ = read_uploaded_files_with_logs(files)
+    return data
 
 
 def demo_data(scenario_name: str) -> pd.DataFrame:
@@ -471,36 +624,96 @@ def auto_feedback_category(text: str) -> str:
 
 
 def upload_repair_tips(error_logs: List[Dict[str, str]]) -> pd.DataFrame:
+    """把上传错误转成用户可自助修复的操作建议。"""
     if not error_logs:
-        return pd.DataFrame(columns=["问题", "可能原因", "自助修复建议"])
+        return pd.DataFrame(columns=["文件名", "问题类型", "可能原因", "自助修复建议", "建议优先级"])
     rows = []
     for e in error_logs:
-        msg = e.get("错误", "")
-        if "No such" in msg or "not found" in msg:
-            rows.append({"问题": e.get("文件名", "未知文件"), "可能原因": "文件路径或文件名异常", "自助修复建议": "重新选择文件上传，避免文件名含特殊符号。"})
-        elif "Excel" in msg or "workbook" in msg or "format" in msg:
-            rows.append({"问题": e.get("文件名", "未知文件"), "可能原因": "Excel格式不规范或文件损坏", "自助修复建议": "用Excel重新打开并另存为 .xlsx 后再上传。"})
-        elif "Unicode" in msg or "codec" in msg:
-            rows.append({"问题": e.get("文件名", "未知文件"), "可能原因": "CSV编码不兼容", "自助修复建议": "将CSV另存为 UTF-8 编码，或改用 .xlsx 上传。"})
+        fname = e.get("文件名", "未知文件")
+        msg = str(e.get("错误", ""))
+        low = msg.lower()
+        if any(x in low for x in ["unicode", "codec", "encoding", "decode"]):
+            row = {"文件名": fname, "问题类型": "CSV编码异常", "可能原因": "CSV不是UTF-8编码，常见于Excel导出的GBK/GB18030文件。", "自助修复建议": "用Excel打开后另存为 .xlsx，或另存为 UTF-8 CSV 后重新上传。", "建议优先级": "高"}
+        elif any(x in low for x in ["excel", "workbook", "file is not a zip", "badzip", "openpyxl"]):
+            row = {"文件名": fname, "问题类型": "Excel文件结构异常", "可能原因": "文件可能损坏、不是标准xlsx、含复杂合并单元格或加密。", "自助修复建议": "用Excel重新打开，取消合并单元格，另存为新的 .xlsx 文件后再上传。", "建议优先级": "高"}
+        elif any(x in low for x in ["permission", "access", "denied"]):
+            row = {"文件名": fname, "问题类型": "文件权限异常", "可能原因": "文件可能被占用，或浏览器没有读取权限。", "自助修复建议": "关闭正在打开该文件的Excel/Word/PDF，再重新选择上传。", "建议优先级": "中"}
+        elif any(x in low for x in ["empty", "no columns", "no data"]):
+            row = {"文件名": fname, "问题类型": "空文件或无表头", "可能原因": "文件没有有效数据，或第一行不是表头。", "自助修复建议": "确认第一行为字段名，第二行开始为数据；删除空行空列后重试。", "建议优先级": "高"}
+        elif any(x in low for x in ["unsupported", "not supported", "extension"]):
+            row = {"文件名": fname, "问题类型": "格式暂不支持", "可能原因": "上传了非Excel/CSV或非作业批改支持格式。", "自助修复建议": "数据分析请上传 .xlsx/.csv；作业批改请上传 .txt/.docx/.pdf/.zip。", "建议优先级": "中"}
         else:
-            rows.append({"问题": e.get("文件名", "未知文件"), "可能原因": "文件结构、权限或格式异常", "自助修复建议": "检查第一行是否为表头；删除合并单元格；保留结构化表格后重试。"})
+            row = {"文件名": fname, "问题类型": "文件结构或格式异常", "可能原因": "表头、编码、格式或文件内容不符合结构化分析要求。", "自助修复建议": "保留一张结构化表，第一行为表头；删除说明行、合并单元格、空白列后重试。", "建议优先级": "中"}
+        rows.append(row)
     return pd.DataFrame(rows)
+
+
+def _read_csv_robust(raw: bytes) -> pd.DataFrame:
+    last_error = None
+    for enc in ["utf-8-sig", "utf-8", "gb18030", "gbk"]:
+        for sep in [",", "	", ";", None]:
+            try:
+                if sep is None:
+                    return pd.read_csv(io.BytesIO(raw), encoding=enc, sep=None, engine="python")
+                return pd.read_csv(io.BytesIO(raw), encoding=enc, sep=sep)
+            except Exception as e:
+                last_error = e
+    raise last_error or ValueError("CSV读取失败")
+
+
+def _read_excel_robust(raw: bytes, file_name: str) -> pd.DataFrame:
+    suffix = Path(file_name).suffix.lower()
+    if suffix not in [".xlsx", ".xls", ".xlsm"]:
+        raise ValueError(f"unsupported extension {suffix}")
+    try:
+        return pd.read_excel(io.BytesIO(raw), engine="openpyxl" if suffix in [".xlsx", ".xlsm"] else None)
+    except Exception as e:
+        raise ValueError(f"Excel读取失败：{e}")
+
+
+def _log_upload_error(file_name: str, error_type: str, error_message: str, suggestion: str):
+    try:
+        conn = db_conn()
+        conn.execute(
+            "INSERT INTO upload_error_events(user_email, file_name, error_type, error_message, repair_suggestion, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (current_email(), file_name, error_type, error_message, suggestion, datetime.now().isoformat())
+        )
+        conn.commit(); conn.close()
+    except Exception:
+        pass
 
 
 def read_uploaded_files_with_logs(files: List[Any]):
     frames, logs, errors = [], [], []
+    if not files:
+        return pd.DataFrame(), pd.DataFrame(columns=["文件名","状态","行数","列数","错误","建议"]), pd.DataFrame(columns=["文件名","问题类型","可能原因","自助修复建议","建议优先级"])
     for f in files:
+        fname = getattr(f, "name", "unknown")
         try:
-            if f.name.lower().endswith(".csv"):
-                df = pd.read_csv(f)
+            raw = f.getvalue() if hasattr(f, "getvalue") else f.read()
+            if not raw:
+                raise ValueError("empty file")
+            suffix = Path(fname).suffix.lower()
+            if suffix == ".csv":
+                df = _read_csv_robust(raw)
+            elif suffix in [".xlsx", ".xls", ".xlsm"]:
+                df = _read_excel_robust(raw, fname)
             else:
-                df = pd.read_excel(f)
-            df["来源文件"] = f.name
+                raise ValueError(f"unsupported extension {suffix}")
+            if df.empty or len(df.columns) == 0:
+                raise ValueError("empty or no columns")
+            df.columns = [str(c).strip() if str(c).strip() else f"未命名列_{i+1}" for i, c in enumerate(df.columns)]
+            df["来源文件"] = fname
             frames.append(df)
-            logs.append({"文件名": f.name, "状态": "读取成功", "行数": len(df), "列数": len(df.columns), "错误": ""})
+            logs.append({"文件名": fname, "状态": "读取成功", "行数": len(df), "列数": len(df.columns), "错误": "", "建议": "可继续分析"})
         except Exception as e:
-            logs.append({"文件名": f.name, "状态": "读取失败", "行数": 0, "列数": 0, "错误": str(e)})
-            errors.append({"文件名": f.name, "错误": str(e)})
+            err = {"文件名": fname, "错误": str(e)}
+            errors.append(err)
+            tips = upload_repair_tips([err])
+            suggestion = tips.iloc[0]["自助修复建议"] if len(tips) else "检查文件结构后重试"
+            issue_type = tips.iloc[0]["问题类型"] if len(tips) else "读取失败"
+            _log_upload_error(fname, issue_type, str(e), suggestion)
+            logs.append({"文件名": fname, "状态": "读取失败", "行数": 0, "列数": 0, "错误": str(e), "建议": suggestion})
     data = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     return data, pd.DataFrame(logs), upload_repair_tips(errors)
 
@@ -716,7 +929,10 @@ def run_ai(prompt: str, provider: Optional[str] = None) -> str:
 # ----------------------------
 # Layout / Navigation
 # ----------------------------
-NAV_PAGES = ["首页", "首次使用向导", "工作台", "场景配置向导", "样例报告库", "模板中心", "AI推荐策略", "交互图表", "体验数据分析", "AI智能中心", "AI作业批改", "隐私与数据", "App与桌面版", "桌面版启动页", "移动端体验", "PWA安装引导", "协议与政策", "上架前检查", "系统后台", "反馈"]
+TOP_NAV_PAGES = ["手机端优化", "App与桌面版", "桌面版启动页", "移动端体验", "PWA安装引导"]
+CORE_NAV_PAGES = ["首页", "首次使用向导", "工作台", "场景配置向导", "样例报告库", "模板中心", "成果分享中心", "用户案例库", "传播分析", "AI推荐策略", "交互图表", "体验数据分析", "AI智能中心", "AI作业批改"]
+FOOTER_NAV_PAGES = ["一人公司运营中枢", "产品优化中心", "隐私与数据", "协议与政策", "上架前检查", "系统后台", "反馈"]
+NAV_PAGES = TOP_NAV_PAGES + CORE_NAV_PAGES + FOOTER_NAV_PAGES
 
 def set_page(page: str):
     st.session_state.page = page
@@ -732,15 +948,37 @@ def sidebar():
             st.markdown(f"<div class='successbox'>已登录：<br>{current_email()}</div>", unsafe_allow_html=True)
         else:
             st.markdown("<div class='infobox'>当前：访客模式<br>免费开放，可先体验。</div>", unsafe_allow_html=True)
+
         st.markdown("---")
-        st.caption("导航")
-        for page in NAV_PAGES:
+        st.markdown("<div class='nav-section-title'>应用入口</div>", unsafe_allow_html=True)
+        for page in TOP_NAV_PAGES:
             active = "● " if st.session_state.page == page else "○ "
-            if st.button(active + page, key=f"nav_{page}", use_container_width=True):
+            if st.button(active + page, key=f"nav_top_{page}", use_container_width=True):
                 set_page(page)
+
+        st.markdown("---")
+        st.markdown("<div class='nav-section-title'>核心功能服务</div>", unsafe_allow_html=True)
+        for page in CORE_NAV_PAGES:
+            active = "● " if st.session_state.page == page else "○ "
+            if st.button(active + page, key=f"nav_core_{page}", use_container_width=True):
+                set_page(page)
+
         st.markdown("---")
         st.caption(f"客服邮箱：{CONTACT_EMAIL}")
-        st.caption("当前版本：永久免费开放核心功能")
+        st.caption("辅助入口已移到页面底部，避免左侧导航过载。")
+
+
+def render_bottom_utility_links():
+    st.markdown("<div class='footer-links'>", unsafe_allow_html=True)
+    st.markdown("<div class='footer-links-title'>辅助入口 / 管理与政策</div>", unsafe_allow_html=True)
+    cols = st.columns(len(FOOTER_NAV_PAGES))
+    for col, page in zip(cols, FOOTER_NAV_PAGES):
+        with col:
+            if st.button(page, key=f"footer_nav_{page}", use_container_width=True):
+                set_page(page)
+    st.markdown(f"<div class='small'>联系客服：{CONTACT_EMAIL}｜核心功能免费开放，辅助页面统一放在底部，减少主导航干扰。</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
 
 
 def login_panel():
@@ -1013,6 +1251,115 @@ def render_ai_center():
                 st.info("可以先切换到“本地规则模式”，或检查 Streamlit Secrets 中的 API Key 配置。")
 
 
+
+def extract_text_from_docx(raw: bytes) -> str:
+    try:
+        from docx import Document
+        doc = Document(io.BytesIO(raw))
+        return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+    except Exception as e:
+        raise ValueError(f"Word解析失败：{e}")
+
+
+def extract_text_from_pdf(raw: bytes) -> str:
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(raw))
+        texts = []
+        for page in reader.pages[:80]:
+            try:
+                texts.append(page.extract_text() or "")
+            except Exception:
+                pass
+        return "\n".join(texts).strip()
+    except Exception as e:
+        raise ValueError(f"PDF解析失败：{e}")
+
+
+def extract_assignment_documents(uploaded_files: List[Any]) -> List[Dict[str, str]]:
+    """支持 txt / docx / pdf / zip 的作业文本抽取。"""
+    docs = []
+    for f in uploaded_files or []:
+        fname = getattr(f, "name", "unknown")
+        raw = f.getvalue() if hasattr(f, "getvalue") else f.read()
+        suffix = Path(fname).suffix.lower()
+        try:
+            if suffix == ".txt":
+                text = raw.decode("utf-8", errors="ignore")
+                docs.append({"学生": Path(fname).stem, "文件名": fname, "文本": text, "状态": "成功", "错误": ""})
+            elif suffix == ".docx":
+                docs.append({"学生": Path(fname).stem, "文件名": fname, "文本": extract_text_from_docx(raw), "状态": "成功", "错误": ""})
+            elif suffix == ".pdf":
+                docs.append({"学生": Path(fname).stem, "文件名": fname, "文本": extract_text_from_pdf(raw), "状态": "成功", "错误": ""})
+            elif suffix == ".zip":
+                with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                    for name in z.namelist():
+                        if name.endswith("/") or name.startswith("__MACOSX"):
+                            continue
+                        sub_suffix = Path(name).suffix.lower()
+                        if sub_suffix not in [".txt", ".docx", ".pdf"]:
+                            continue
+                        sub_raw = z.read(name)
+                        if sub_suffix == ".txt":
+                            text = sub_raw.decode("utf-8", errors="ignore")
+                        elif sub_suffix == ".docx":
+                            text = extract_text_from_docx(sub_raw)
+                        else:
+                            text = extract_text_from_pdf(sub_raw)
+                        docs.append({"学生": Path(name).stem, "文件名": name, "文本": text, "状态": "成功", "错误": ""})
+            else:
+                docs.append({"学生": Path(fname).stem, "文件名": fname, "文本": "", "状态": "失败", "错误": "暂不支持该文件格式"})
+        except Exception as e:
+            docs.append({"学生": Path(fname).stem, "文件名": fname, "文本": "", "状态": "失败", "错误": str(e)})
+    return docs
+
+
+def detect_assignment_similarity(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    from difflib import SequenceMatcher
+    pairs = []
+    valid = [r for r in rows if str(r.get("文本", "")).strip()]
+    for i in range(len(valid)):
+        for j in range(i + 1, len(valid)):
+            a, b = valid[i], valid[j]
+            ta, tb = a.get("文本", "")[:5000], b.get("文本", "")[:5000]
+            sim = SequenceMatcher(None, ta, tb).ratio()
+            if sim >= 0.72:
+                pairs.append({"学生A": a.get("学生"), "学生B": b.get("学生"), "相似度": round(sim * 100, 2), "标注": "疑似雷同，建议教师人工复核"})
+    return pd.DataFrame(pairs) if pairs else pd.DataFrame(columns=["学生A", "学生B", "相似度", "标注"])
+
+
+def save_grading_history(rows: List[Dict[str, Any]], assignment_type: str):
+    try:
+        conn = db_conn()
+        for r in rows:
+            conn.execute(
+                "INSERT INTO grading_history(student, assignment_type, score, level, similarity_note, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (str(r.get("学生/文件", "")), assignment_type, float(r.get("得分", 0)), str(r.get("等级", "")), str(r.get("雷同风险", "")), datetime.now().isoformat())
+            )
+        conn.commit(); conn.close()
+    except Exception:
+        pass
+
+
+def historical_performance_label(student: str, current_score: float) -> str:
+    try:
+        conn = db_conn()
+        hist = pd.read_sql_query("SELECT score FROM grading_history WHERE student=? ORDER BY created_at DESC LIMIT 3", conn, params=(student,))
+        conn.close()
+        scores = hist["score"].tolist() if not hist.empty else []
+        scores = [float(x) for x in scores if x is not None]
+        if len(scores) >= 2 and all(s >= 85 for s in scores) and current_score >= 85:
+            return "表扬：该生历史表现稳定较好，可作为优秀样例。"
+        if len(scores) >= 2 and all(s < 60 for s in scores) and current_score < 60:
+            return "警告：该生连续低分，建议教师重点辅导。"
+        if scores and current_score > max(scores):
+            return "进步：本次表现较历史记录有提升。"
+        return "正常：暂无明显长期风险。"
+    except Exception:
+        return "正常：暂无历史记录。"
+
+
+
 def score_assignment_text(text: str, rubric: str) -> Dict[str, Any]:
     words = len(text)
     score = 60
@@ -1028,44 +1375,118 @@ def score_assignment_text(text: str, rubric: str) -> Dict[str, Any]:
 
 def render_grading():
     st.markdown("## AI 作业批改")
-    st.markdown("<div class='infobox'>当前为辅助批改工具，适合初筛、生成评语和统计分析。正式成绩仍建议教师复核。</div>", unsafe_allow_html=True)
-    assignment_type = st.selectbox("作业类型", ["通用文字作业", "课程论文", "实习报告", "实验报告", "读书报告", "代码说明文档"])
-    rubric = st.text_area("评分标准细则", placeholder="例如：结构完整20分；观点清晰20分；案例和数据30分；反思总结20分；格式规范10分。", height=120)
-    uploaded = st.file_uploader("上传 TXT 作业文件（MVP版），后续可扩展 Word/PDF/ZIP 深度解析", type=["txt"], accept_multiple_files=True)
+    st.markdown("<div class='infobox'>本功能用于辅助教师初筛、生成评语、识别疑似雷同和统计班级表现。正式成绩仍建议教师复核。</div>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1, 1], gap="large")
+    with c1:
+        assignment_type = st.selectbox("作业类型", ["通用文字作业", "课程论文", "实习报告", "实验报告", "读书报告", "代码说明文档"])
+        rubric = st.text_area("评分标准细则", placeholder="例如：结构完整20分；观点清晰20分；案例和数据30分；反思总结20分；格式规范10分。", height=120)
+    with c2:
+        st.markdown("### 批改稳定性说明")
+        st.markdown("""
+        - 支持 `.txt / .docx / .pdf / .zip`
+        - ZIP 中可包含多份学生作业
+        - PDF 文字提取受文件质量影响，扫描件可能需要 OCR 后再上传
+        - 雷同识别为辅助筛查，不等同正式学术查重
+        """)
+    uploaded = st.file_uploader("上传作业文件或ZIP作业包", type=["txt", "docx", "pdf", "zip"], accept_multiple_files=True)
     if st.button("开始批改", use_container_width=True):
+        if not uploaded:
+            st.warning("请先上传作业文件。")
+            return
+        docs = extract_assignment_documents(uploaded)
+        extract_log = pd.DataFrame([{k: v for k, v in d.items() if k != "文本"} for d in docs])
+        with st.expander("文件解析日志", expanded=False):
+            st.dataframe(extract_log, use_container_width=True)
+        success_docs = [d for d in docs if d.get("状态") == "成功" and str(d.get("文本", "")).strip()]
+        if not success_docs:
+            st.error("没有成功解析的作业文本。请查看文件解析日志，并尝试转换为 .docx 或 .txt 后重新上传。")
+            return
+
+        sim_df = detect_assignment_similarity(success_docs)
+        sim_notes = {}
+        for _, r in sim_df.iterrows():
+            sim_notes.setdefault(r["学生A"], []).append(f"与 {r['学生B']} 相似度 {r['相似度']}%")
+            sim_notes.setdefault(r["学生B"], []).append(f"与 {r['学生A']} 相似度 {r['相似度']}%")
+
         rows = []
-        for f in uploaded or []:
-            text = f.read().decode("utf-8", errors="ignore")
-            res = score_assignment_text(text, rubric)
-            student = Path(f.name).stem
-            rows.append({"学生/文件": student, "作业类型": assignment_type, **res})
-        if rows:
-            df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True)
-            out = io.BytesIO()
-            with pd.ExcelWriter(out, engine="openpyxl") as writer:
-                df.to_excel(writer, sheet_name="批改结果", index=False)
-                pd.DataFrame([{"评分标准": rubric, "作业类型": assignment_type}]).to_excel(writer, sheet_name="评分设置", index=False)
-            st.download_button("下载批改结果 Excel", out.getvalue(), "AI作业批改结果.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        else:
-            st.warning("请先上传 TXT 作业文件。")
+        for d in success_docs:
+            res = score_assignment_text(d["文本"], rubric)
+            student = d["学生"]
+            plagiarism = "；".join(sim_notes.get(student, [])) or "未发现明显雷同"
+            hist_label = historical_performance_label(student, res["得分"])
+            rows.append({
+                "学生/文件": student,
+                "文件名": d["文件名"],
+                "作业类型": assignment_type,
+                "得分": res["得分"],
+                "等级": res["等级"],
+                "字数": res["字数"],
+                "雷同风险": plagiarism,
+                "历史表现标注": hist_label,
+                "命中要点": res["命中要点"],
+                "AI批改意见": res["评语"],
+            })
+        df = pd.DataFrame(rows)
+        save_grading_history(rows, assignment_type)
+
+        st.markdown("### 批改结果")
+        st.dataframe(df, use_container_width=True)
+        if not sim_df.empty:
+            st.markdown("### 疑似雷同检测")
+            st.dataframe(sim_df, use_container_width=True)
+            st.warning("雷同检测仅为辅助筛查，正式判断需要教师人工复核。")
+
+        summary = pd.DataFrame([{
+            "作业数量": len(df),
+            "平均分": round(df["得分"].mean(), 2),
+            "优秀人数": int((df["得分"] >= 85).sum()),
+            "低分风险人数": int((df["得分"] < 60).sum()),
+            "疑似雷同人数": int(df["雷同风险"].ne("未发现明显雷同").sum()),
+            "建议": "优先复核疑似雷同和低分作业；对连续高分学生给予表扬。"
+        }])
+        st.markdown("### 班级分析")
+        st.dataframe(summary, use_container_width=True)
+
+        out = io.BytesIO()
+        with pd.ExcelWriter(out, engine="openpyxl") as writer:
+            df.to_excel(writer, sheet_name="AI批改结果", index=False)
+            summary.to_excel(writer, sheet_name="班级分析", index=False)
+            sim_df.to_excel(writer, sheet_name="雷同检测", index=False)
+            extract_log.to_excel(writer, sheet_name="文件解析日志", index=False)
+            pd.DataFrame([{"评分标准": rubric, "作业类型": assignment_type}]).to_excel(writer, sheet_name="评分设置", index=False)
+        st.download_button("下载批改结果 Excel", out.getvalue(), "AI作业批改结果.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="download_grading_batch63")
 
 
 def render_feedback():
     st.markdown("## 用户反馈")
-    content = st.text_area("反馈内容", height=180, placeholder="例如：上传文件失败、AI回答不准、模板字段不够、报告下载有问题、界面导航卡顿……")
+    st.markdown("<div class='infobox'>你的反馈会进入产品优化中心，用于生成修复任务、优先级和下一轮迭代计划。</div>", unsafe_allow_html=True)
+    quick = st.selectbox("常见问题快捷选择", ["手动填写", "上传失败", "AI回答不准", "字段识别不准", "报告下载失败", "手机端不好用", "作业批改不稳定", "高校就业报告看不懂", "电商售后字段不够"])
+    default_text = "" if quick == "手动填写" else f"我遇到的问题是：{quick}。请协助优化。"
+    content = st.text_area("反馈内容", value=default_text, height=180, placeholder="例如：上传文件失败、AI回答不准、模板字段不够、报告下载有问题、界面导航卡顿……")
     suggested = auto_feedback_category(content) if content.strip() else "其他"
     st.caption(f"系统自动分类建议：{suggested}")
-    category = st.selectbox("反馈类型", ["上传/文件问题", "AI结果问题", "模板/字段建议", "报告/下载问题", "界面体验", "其他"], index=["上传/文件问题", "AI结果问题", "模板/字段建议", "报告/下载问题", "界面体验", "其他"].index(suggested) if suggested in ["上传/文件问题", "AI结果问题", "模板/字段建议", "报告/下载问题", "界面体验", "其他"] else 5)
+    categories = ["上传/文件问题", "AI结果问题", "模板/字段建议", "报告/下载问题", "界面体验", "其他"]
+    category = st.selectbox("反馈类型", categories, index=categories.index(suggested) if suggested in categories else 5)
+    scenario = st.selectbox("关联场景", ["不确定 / 通用", "电商退款 / 售后工单汇总", "高校教务 / 实习 / 就业数据汇总", "AI 作业批改", "移动端 / PWA", "桌面版"])
     if st.button("提交反馈", use_container_width=True):
         if content.strip():
+            full_content = f"[关联场景：{scenario}] {content}"
             conn = db_conn()
-            conn.execute("INSERT INTO feedback(user_email, category, content, created_at) VALUES (?, ?, ?, ?)", (current_email(), category, content, datetime.now().isoformat()))
+            conn.execute("INSERT INTO feedback(user_email, category, content, created_at) VALUES (?, ?, ?, ?)", (current_email(), category, full_content, datetime.now().isoformat()))
             conn.commit()
             conn.close()
-            st.success("反馈已提交，并已完成自动分类。感谢你帮助产品变得更好。")
+            st.success("反馈已提交，并已进入产品优化闭环。")
+            st.info("如果是阻断性问题，也可以直接联系：" + CONTACT_EMAIL)
         else:
             st.warning("请填写反馈内容。")
+    st.markdown("### 反馈后会发生什么")
+    st.markdown("""
+    1. 系统自动分类反馈。  
+    2. 产品优化中心会生成任务和优先级。  
+    3. 每批迭代后会生成复盘报告。  
+    4. 高优先级问题会优先进入下一批修复。  
+    """)
     st.info(f"遇到无法解决的问题，也可以联系：{CONTACT_EMAIL}")
 
 
@@ -1161,39 +1582,79 @@ def ecommerce_deep_analysis(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     status_col = find_col(df, "处理状态")
     amount_col = find_col(df, "退款金额") or find_col(df, "金额")
     service_col = find_col(df, "客服") or find_col(df, "销售人员")
-    duration_col = "处理时长" if "处理时长" in df.columns else None
+    duration_col = find_col(df, "处理时长")
+    response_col = find_col(df, "响应时长")
+    compensation_col = find_col(df, "赔付金额")
+    order_col = find_col(df, "订单号")
     amount = pd.to_numeric(df[amount_col], errors="coerce").fillna(0) if amount_col else pd.Series([0]*len(df))
+    compensation = pd.to_numeric(df[compensation_col], errors="coerce").fillna(0) if compensation_col else pd.Series([0]*len(df))
     outputs = {}
+    base = df.copy()
+    base["_退款金额"] = amount
+    base["_赔付金额"] = compensation
+    base["_售后净损失"] = base["_退款金额"] + base["_赔付金额"]
+
     if reason_col:
-        outputs["退款原因深度分析"] = df.assign(_金额=amount).groupby(reason_col, dropna=False).agg(工单数=(reason_col,"count"),退款金额=("_金额","sum")).reset_index().sort_values("工单数", ascending=False)
+        outputs["退款原因深度分析"] = base.groupby(reason_col, dropna=False).agg(
+            工单数=(reason_col,"count"),
+            退款金额=("_退款金额","sum"),
+            赔付金额=("_赔付金额","sum"),
+            售后净损失=("_售后净损失","sum")
+        ).reset_index().sort_values(["售后净损失","工单数"], ascending=False)
     if product_col:
-        outputs["商品售后风险排行"] = df.assign(_金额=amount).groupby(product_col, dropna=False).agg(售后次数=(product_col,"count"),退款金额=("_金额","sum")).reset_index().sort_values(["退款金额","售后次数"], ascending=False)
+        risk = base.groupby(product_col, dropna=False).agg(
+            售后次数=(product_col,"count"),
+            退款金额=("_退款金额","sum"),
+            售后净损失=("_售后净损失","sum")
+        ).reset_index()
+        risk["风险等级"] = pd.cut(risk["售后净损失"].rank(method="first"), bins=[0, max(1, len(risk)*0.5), max(2, len(risk)*0.8), len(risk)+1], labels=["低","中","高"])
+        outputs["商品售后风险排行"] = risk.sort_values(["售后净损失","售后次数"], ascending=False)
     if channel_col:
-        outputs["渠道售后表现"] = df.assign(_金额=amount).groupby(channel_col, dropna=False).agg(售后工单=(channel_col,"count"),退款金额=("_金额","sum")).reset_index().sort_values("退款金额", ascending=False)
+        outputs["渠道售后表现"] = base.groupby(channel_col, dropna=False).agg(
+            售后工单=(channel_col,"count"),
+            退款金额=("_退款金额","sum"),
+            赔付金额=("_赔付金额","sum"),
+            售后净损失=("_售后净损失","sum")
+        ).reset_index().sort_values("售后净损失", ascending=False)
     if service_col:
-        tmp = df.assign(_金额=amount)
-        aggs = {"处理工单": (service_col, "count"), "涉及退款": ("_金额", "sum")}
+        tmp = base.copy()
+        aggs = {"处理工单": (service_col, "count"), "涉及退款": ("_退款金额", "sum"), "售后净损失": ("_售后净损失","sum")}
         if duration_col:
-            tmp["_时长"] = pd.to_numeric(tmp[duration_col], errors="coerce")
-            aggs["平均处理时长"] = ("_时长", "mean")
+            tmp["_处理时长"] = pd.to_numeric(tmp[duration_col], errors="coerce")
+            aggs["平均处理时长"] = ("_处理时长", "mean")
+        if response_col:
+            tmp["_响应时长"] = pd.to_numeric(tmp[response_col], errors="coerce")
+            aggs["平均响应时长"] = ("_响应时长", "mean")
         outputs["客服处理效率"] = tmp.groupby(service_col, dropna=False).agg(**aggs).reset_index()
-    high = df.copy()
-    high["_退款金额"] = amount
-    risk_reason = []
+    # 高风险工单：金额高、超时、响应慢、状态未完结
+    high = base.copy()
+    flags = []
     if status_col:
-        risk_reason.append(high[status_col].astype(str).str.contains("超时|处理中|未处理|待处理", regex=True, na=False))
+        flags.append(high[status_col].astype(str).str.contains("超时|处理中|未处理|待处理|待审核|未完结|申诉", regex=True, na=False))
     if duration_col:
-        risk_reason.append(pd.to_numeric(high[duration_col], errors="coerce").fillna(0) >= 48)
-    risk_reason.append(high["_退款金额"] >= max(300, high["_退款金额"].quantile(0.8) if len(high) else 300))
-    mask = risk_reason[0]
-    for m in risk_reason[1:]:
-        mask = mask | m
+        flags.append(pd.to_numeric(high[duration_col], errors="coerce").fillna(0) >= 48)
+    if response_col:
+        flags.append(pd.to_numeric(high[response_col], errors="coerce").fillna(0) >= 12)
+    threshold = max(300, high["_售后净损失"].quantile(0.8) if len(high) else 300)
+    flags.append(high["_售后净损失"] >= threshold)
+    mask = flags[0] if flags else pd.Series([False]*len(high))
+    for flg in flags[1:]:
+        mask = mask | flg
     risk = high[mask].copy()
     if len(risk):
-        risk["风险标注"] = "高金额/超时/未完结，建议优先复核"
-        outputs["高风险售后工单"] = risk.drop(columns=["_退款金额"], errors="ignore")
+        risk["风险标注"] = "高金额/响应慢/处理超时/未完结，建议优先复核"
+        show_cols = [c for c in [order_col, product_col, channel_col, reason_col, status_col, service_col, amount_col, compensation_col, duration_col, response_col, "风险标注"] if c]
+        outputs["高风险售后工单"] = risk[show_cols] if show_cols else risk
     else:
         outputs["高风险售后工单"] = pd.DataFrame([{"结论":"未识别到明显高风险工单"}])
+    # 字段口径建议，帮助用户补字段
+    outputs["电商字段口径建议"] = pd.DataFrame([
+        {"字段": "订单号", "用途": "识别同一笔交易/售后工单", "建议": "平台订单号、退款单号、售后工单号都可映射为订单号。"},
+        {"字段": "退款金额", "用途": "计算退款损失", "建议": "优先使用实际退款金额；若只有申请金额，需在报告中标注口径。"},
+        {"字段": "赔付金额", "用途": "识别额外补偿成本", "建议": "建议单独保留，不要与退款金额混在一起。"},
+        {"字段": "响应时长/处理时长", "用途": "评估客服效率", "建议": "单位建议统一为小时。"},
+        {"字段": "处理状态", "用途": "识别未完结/超时工单", "建议": "建议规范为已完成、处理中、待处理、超时。"},
+    ])
     return outputs
 
 
@@ -1239,6 +1700,21 @@ def education_deep_analysis(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
         tmp["_已落实"] = is_done(tmp[status_col]).astype(int)
         outputs["院系汇总报告"] = tmp.groupby(college_col, dropna=False).agg(学生数=(status_col,"count"),已落实人数=("_已落实","sum")).reset_index()
         outputs["院系汇总报告"]["落实率"] = outputs["院系汇总报告"]["已落实人数"] / outputs["院系汇总报告"]["学生数"].clip(lower=1)
+    # Batch 63：增加更适合院系汇报的可读性摘要
+    if status_col:
+        total_students = len(df)
+        done_count = int(is_done(df[status_col]).sum())
+        pending_count = int(df[status_col].astype(str).str.contains("待就业|未就业|未落实|暂无", regex=True, na=False).sum())
+        salary_value = ""
+        if salary_col:
+            _salary_series = pd.to_numeric(df[salary_col], errors="coerce")
+            salary_value = round(_salary_series.dropna().mean(), 2) if _salary_series.notna().any() else ""
+        outputs["院系报告可读摘要"] = pd.DataFrame([
+            {"项目": "总学生数", "数值": total_students, "解释": "本次纳入统计的学生总数。", "建议": "确认是否覆盖所有班级/专业。"},
+            {"项目": "已落实人数", "数值": done_count, "解释": "包含已就业、升学、实习、签约、录用、创业等状态。", "建议": "建议与院系就业台账复核口径。"},
+            {"项目": "待帮扶人数", "数值": pending_count, "解释": "待就业、未就业、未落实等需要重点跟进。", "建议": "建议辅导员建立一对一帮扶记录。"},
+            {"项目": "平均薪资", "数值": salary_value, "解释": "仅基于已填写薪资的数据计算。", "建议": "薪资不是唯一质量指标，应结合行业、岗位和地区综合判断。"},
+        ])
     return outputs
 
 
@@ -1889,6 +2365,547 @@ def render_user_experience_analytics():
         st.dataframe(hist, use_container_width=True)
 
 
+
+
+# ============================================================
+# Batch 62：真实用户反馈闭环 + 产品优化任务看板 + AI 迭代计划
+# ============================================================
+
+FEEDBACK_TASK_STATUS = ["待处理", "处理中", "已完成", "暂缓", "需更多反馈"]
+
+
+def feedback_priority_score(category: str, content: str) -> int:
+    """把用户反馈转成可执行优先级。分数越高越应该先处理。"""
+    text = (content or "").lower()
+    score = 40
+    category_weight = {
+        "上传/文件问题": 22,
+        "AI结果问题": 20,
+        "报告/下载问题": 18,
+        "界面体验": 14,
+        "模板/字段建议": 13,
+        "其他": 8,
+    }
+    score += category_weight.get(category, 8)
+    critical_words = ["打不开", "不能用", "报错", "闪退", "崩溃", "无法上传", "无法下载", "数据丢失", "隐私", "泄露", "批改错误", "分数不准"]
+    high_value_words = ["高校", "作业", "电商", "售后", "就业", "报告", "手机", "桌面", "ai", "模板", "字段"]
+    if any(w in text for w in critical_words):
+        score += 28
+    if any(w in text for w in high_value_words):
+        score += 10
+    if len(text) >= 80:
+        score += 6
+    return max(0, min(100, score))
+
+
+def infer_feedback_scenario(content: str) -> str:
+    text = (content or "").lower()
+    rules = [
+        ("电商退款 / 售后工单汇总", ["电商", "售后", "退款", "退货", "客服", "工单"]),
+        ("高校教务 / 实习 / 就业数据汇总", ["高校", "就业", "实习", "院系", "学生", "班级", "专业"]),
+        ("AI 作业批改", ["作业", "批改", "评分", "雷同", "抄袭", "评语"]),
+        ("移动端 / PWA", ["手机", "移动", "pwa", "主屏幕", "浏览器"]),
+        ("桌面版", ["桌面", "安装包", "exe", "electron", "启动"]),
+        ("通用体验", ["界面", "导航", "按钮", "首页", "慢", "卡"]),
+    ]
+    for name, kws in rules:
+        if any(k in text for k in kws):
+            return name
+    return "通用体验"
+
+
+def task_title_from_feedback(category: str, content: str) -> str:
+    short = (content or "").strip().replace("\n", " ")
+    if len(short) > 28:
+        short = short[:28] + "…"
+    if not short:
+        short = "未填写具体反馈"
+    return f"[{category}] {short}"
+
+
+def task_reason(category: str, content: str, score: int) -> str:
+    scenario = infer_feedback_scenario(content)
+    if score >= 85:
+        level = "阻断级：影响用户完成核心任务，应优先修复。"
+    elif score >= 70:
+        level = "高优先级：影响首次成功体验或核心场景质量。"
+    elif score >= 55:
+        level = "中优先级：影响体验稳定性，建议排入近期版本。"
+    else:
+        level = "观察项：继续收集更多反馈后再决定。"
+    return f"场景：{scenario}；判断：{level}"
+
+
+def load_feedback_df() -> pd.DataFrame:
+    try:
+        conn = db_conn()
+        df = pd.read_sql_query("SELECT * FROM feedback ORDER BY created_at DESC", conn)
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["id", "user_email", "category", "content", "created_at"])
+
+
+def load_feedback_tasks_df() -> pd.DataFrame:
+    try:
+        conn = db_conn()
+        df = pd.read_sql_query("SELECT * FROM feedback_tasks ORDER BY priority_score DESC, created_at DESC", conn)
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["id", "source_feedback_id", "title", "category", "scenario", "priority_score", "status", "ai_reason", "created_at"])
+
+
+def create_tasks_from_feedback() -> int:
+    fb = load_feedback_df()
+    if fb.empty:
+        return 0
+    conn = db_conn()
+    created = 0
+    existing = pd.read_sql_query("SELECT COALESCE(source_feedback_id, -1) AS source_feedback_id FROM feedback_tasks", conn)
+    existing_ids = set(existing["source_feedback_id"].astype(int).tolist()) if not existing.empty else set()
+    for _, row in fb.iterrows():
+        fid = int(row.get("id", 0))
+        if fid in existing_ids:
+            continue
+        cat = row.get("category", "其他") or auto_feedback_category(row.get("content", ""))
+        content = row.get("content", "") or ""
+        scenario = infer_feedback_scenario(content)
+        score = feedback_priority_score(cat, content)
+        title = task_title_from_feedback(cat, content)
+        reason = task_reason(cat, content, score)
+        conn.execute(
+            "INSERT INTO feedback_tasks(source_feedback_id, title, category, scenario, priority_score, status, ai_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (fid, title, cat, scenario, score, "待处理", reason, datetime.now().isoformat()),
+        )
+        created += 1
+    conn.commit()
+    conn.close()
+    return created
+
+
+def create_demands_from_feedback() -> int:
+    fb = load_feedback_df()
+    if fb.empty:
+        return 0
+    conn = db_conn()
+    created = 0
+    existing = pd.read_sql_query("SELECT COALESCE(source_feedback_id, -1) AS source_feedback_id FROM user_demands", conn)
+    existing_ids = set(existing["source_feedback_id"].astype(int).tolist()) if not existing.empty else set()
+    for _, row in fb.iterrows():
+        fid = int(row.get("id", 0))
+        if fid in existing_ids:
+            continue
+        content = row.get("content", "") or ""
+        cat = row.get("category", "其他") or auto_feedback_category(content)
+        scenario = infer_feedback_scenario(content)
+        score = feedback_priority_score(cat, content)
+        if cat in ["模板/字段建议", "AI结果问题"]:
+            dtype = "功能增强"
+        elif cat in ["上传/文件问题", "报告/下载问题"]:
+            dtype = "稳定性修复"
+        elif cat == "界面体验":
+            dtype = "体验优化"
+        else:
+            dtype = "待判断"
+        conn.execute(
+            "INSERT INTO user_demands(source_feedback_id, demand_type, scenario, description, priority_score, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (fid, dtype, scenario, content[:500], score, datetime.now().isoformat()),
+        )
+        created += 1
+    conn.commit()
+    conn.close()
+    return created
+
+
+def load_user_demands_df() -> pd.DataFrame:
+    try:
+        conn = db_conn()
+        df = pd.read_sql_query("SELECT * FROM user_demands ORDER BY priority_score DESC, created_at DESC", conn)
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["id", "source_feedback_id", "demand_type", "scenario", "description", "priority_score", "created_at"])
+
+
+def feedback_stats_by_scenario() -> pd.DataFrame:
+    tasks = load_feedback_tasks_df()
+    if tasks.empty:
+        return pd.DataFrame(columns=["场景", "反馈任务数", "平均优先级", "待处理数", "最高优先级"])
+    grp = tasks.groupby("scenario", as_index=False).agg(
+        反馈任务数=("id", "count"),
+        平均优先级=("priority_score", "mean"),
+        最高优先级=("priority_score", "max"),
+        待处理数=("status", lambda s: int((s == "待处理").sum())),
+    )
+    grp = grp.rename(columns={"scenario": "场景"})
+    grp["平均优先级"] = grp["平均优先级"].round(1)
+    return grp.sort_values(["最高优先级", "反馈任务数"], ascending=False)
+
+
+def generate_iteration_plan_text() -> str:
+    tasks = load_feedback_tasks_df()
+    demands = load_user_demands_df()
+    hist = safe_read_analysis_history()
+    if tasks.empty and demands.empty:
+        return "当前暂无足够真实反馈。建议先引导用户完成样例报告、上传真实文件并提交反馈，再生成迭代计划。"
+    top_tasks = tasks.head(8).to_dict("records") if not tasks.empty else []
+    top_scene = "暂无"
+    if not tasks.empty:
+        top_scene = tasks["scenario"].value_counts().index[0]
+    avg_trust = hist["trust_score"].mean() if not hist.empty else 0
+    avg_issues = hist["issue_count"].mean() if not hist.empty else 0
+    lines = []
+    lines.append("# Aurevia 智策云｜AI 自动生成迭代计划")
+    lines.append("")
+    lines.append(f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    lines.append(f"当前反馈重点场景：{top_scene}")
+    lines.append(f"历史分析平均可信度：{avg_trust:.1f}；平均问题数：{avg_issues:.1f}")
+    lines.append("")
+    lines.append("## 一、下一轮优先级判断")
+    if top_tasks:
+        for i, t in enumerate(top_tasks[:5], 1):
+            lines.append(f"{i}. {t.get('title')}｜优先级 {t.get('priority_score')}｜{t.get('ai_reason')}")
+    else:
+        lines.append("暂无任务。")
+    lines.append("")
+    lines.append("## 二、建议拆成 3 个开发方向")
+    lines.append("1. 稳定性修复：优先处理上传失败、下载失败、页面报错、AI返回异常。")
+    lines.append("2. 场景深度打磨：优先打磨反馈最多的场景，让一个场景真正解决问题。")
+    lines.append("3. 首次成功体验：继续缩短用户从进入页面到生成第一份报告的路径。")
+    lines.append("")
+    lines.append("## 三、建议下一批验收标准")
+    lines.append("- 用户能在 1 分钟内看到样例报告价值。")
+    lines.append("- 上传失败时能看到明确修复建议。")
+    lines.append("- AI 能解释主要指标和异常问题。")
+    lines.append("- 反馈能自动归类并进入任务看板。")
+    lines.append("- 每个高优先级问题都有状态、负责人或下一步动作。")
+    return "\n".join(lines)
+
+
+def save_iteration_plan(plan_text: str) -> None:
+    conn = db_conn()
+    conn.execute("INSERT INTO iteration_plans(title, plan_text, created_at) VALUES (?, ?, ?)", ("AI自动生成迭代计划", plan_text, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+def render_product_iteration_center():
+    st.markdown("## 产品优化中心")
+    st.markdown("<div class='infobox'>本页把真实用户反馈、行为数据和历史分析结果转成可执行任务，避免产品迭代只凭感觉。</div>", unsafe_allow_html=True)
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["反馈闭环", "任务看板", "用户需求池", "场景痛点统计", "AI迭代计划", "迭代复盘"])
+
+    with tab1:
+        st.markdown("### 真实用户反馈闭环")
+        fb = load_feedback_df()
+        if fb.empty:
+            st.info("暂无用户反馈。建议先在底部“反馈”入口收集真实用户问题。")
+        else:
+            view = fb.copy()
+            view["自动优先级"] = view.apply(lambda r: feedback_priority_score(r.get("category", "其他"), r.get("content", "")), axis=1)
+            view["关联场景"] = view["content"].apply(infer_feedback_scenario)
+            st.dataframe(view, use_container_width=True)
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("从反馈生成优化任务", use_container_width=True):
+                n = create_tasks_from_feedback()
+                st.success(f"已生成 {n} 条新优化任务。")
+                st.rerun()
+        with c2:
+            if st.button("从反馈抽取用户需求", use_container_width=True):
+                n = create_demands_from_feedback()
+                st.success(f"已抽取 {n} 条新用户需求。")
+                st.rerun()
+
+    with tab2:
+        st.markdown("### 产品优化任务看板")
+        tasks = load_feedback_tasks_df()
+        if tasks.empty:
+            st.info("暂无任务。请先从反馈生成任务。")
+        else:
+            status_filter = st.multiselect("筛选状态", FEEDBACK_TASK_STATUS, default=FEEDBACK_TASK_STATUS)
+            shown = tasks[tasks["status"].isin(status_filter)] if status_filter else tasks
+            st.dataframe(shown, use_container_width=True)
+            st.download_button("下载任务看板 CSV", shown.to_csv(index=False).encode("utf-8-sig"), file_name="Aurevia_产品优化任务看板.csv", mime="text/csv", use_container_width=True, key="download_feedback_tasks")
+            st.markdown("#### 手动更新任务状态与人工备注")
+            task_ids = shown["id"].tolist()
+            if task_ids:
+                tid = st.selectbox("选择任务 ID", task_ids)
+                current_row = tasks[tasks["id"] == int(tid)].iloc[0].to_dict()
+                old_status = current_row.get("status", "待处理")
+                new_status = st.selectbox("新状态", FEEDBACK_TASK_STATUS, index=FEEDBACK_TASK_STATUS.index(old_status) if old_status in FEEDBACK_TASK_STATUS else 0)
+                manual_note = st.text_area("人工备注", placeholder="例如：已复现；需要用户提供样例文件；本批已修复；暂缓原因……", height=90)
+                cstat1, cstat2 = st.columns(2)
+                with cstat1:
+                    if st.button("更新状态并记录", use_container_width=True):
+                        conn = db_conn()
+                        conn.execute("UPDATE feedback_tasks SET status=? WHERE id=?", (new_status, int(tid)))
+                        conn.execute("INSERT INTO feedback_task_status_history(task_id, old_status, new_status, operator, created_at) VALUES (?, ?, ?, ?, ?)", (int(tid), old_status, new_status, current_email(), datetime.now().isoformat()))
+                        if manual_note.strip():
+                            conn.execute("INSERT INTO feedback_task_notes(task_id, note, operator, created_at) VALUES (?, ?, ?, ?)", (int(tid), manual_note.strip(), current_email(), datetime.now().isoformat()))
+                        conn.commit(); conn.close()
+                        st.success("任务状态和备注已记录。")
+                        st.rerun()
+                with cstat2:
+                    if st.button("仅添加备注", use_container_width=True):
+                        if manual_note.strip():
+                            conn = db_conn()
+                            conn.execute("INSERT INTO feedback_task_notes(task_id, note, operator, created_at) VALUES (?, ?, ?, ?)", (int(tid), manual_note.strip(), current_email(), datetime.now().isoformat()))
+                            conn.commit(); conn.close()
+                            st.success("人工备注已添加。")
+                            st.rerun()
+                        else:
+                            st.warning("请先填写备注。")
+                with st.expander("查看该任务状态变更与备注", expanded=False):
+                    conn = db_conn()
+                    h = pd.read_sql_query("SELECT old_status, new_status, operator, created_at FROM feedback_task_status_history WHERE task_id=? ORDER BY created_at DESC", conn, params=(int(tid),))
+                    n = pd.read_sql_query("SELECT note, operator, created_at FROM feedback_task_notes WHERE task_id=? ORDER BY created_at DESC", conn, params=(int(tid),))
+                    conn.close()
+                    st.markdown("##### 状态变更记录")
+                    st.dataframe(h, use_container_width=True)
+                    st.markdown("##### 人工备注")
+                    st.dataframe(n, use_container_width=True)
+
+    with tab3:
+        st.markdown("### 用户需求池")
+        demands = load_user_demands_df()
+        if demands.empty:
+            st.info("暂无需求。可以从反馈中抽取。")
+        else:
+            st.dataframe(demands, use_container_width=True)
+            st.download_button("下载用户需求池 CSV", demands.to_csv(index=False).encode("utf-8-sig"), file_name="Aurevia_用户需求池.csv", mime="text/csv", use_container_width=True, key="download_demands")
+
+    with tab4:
+        st.markdown("### 按场景统计用户痛点")
+        stats = feedback_stats_by_scenario()
+        if stats.empty:
+            st.info("暂无可统计的任务数据。")
+        else:
+            st.dataframe(stats, use_container_width=True)
+            if px is not None:
+                st.plotly_chart(px.bar(stats, x="场景", y="反馈任务数", color="平均优先级", title="场景反馈任务数与平均优先级"), use_container_width=True)
+            else:
+                st.bar_chart(stats.set_index("场景")[["反馈任务数"]])
+            st.markdown("#### 解读")
+            top = stats.iloc[0].to_dict()
+            st.info(f"当前最值得优先关注的场景是：{top['场景']}。反馈任务数 {top['反馈任务数']}，平均优先级 {top['平均优先级']}。建议先打磨该场景的上传、字段识别、AI解释和报告下载体验。")
+
+    with tab5:
+        st.markdown("### AI 自动生成下一轮迭代计划")
+        plan_text = generate_iteration_plan_text()
+        st.text_area("迭代计划草案", value=plan_text, height=430)
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("保存本次迭代计划", use_container_width=True):
+                save_iteration_plan(plan_text)
+                st.success("迭代计划已保存。")
+        with c2:
+            st.download_button("下载迭代计划 TXT", plan_text.encode("utf-8"), file_name="Aurevia_AI自动迭代计划.txt", mime="text/plain", use_container_width=True, key="download_iteration_plan")
+
+
+    with tab6:
+        st.markdown("### 每批迭代完成后的复盘报告")
+        st.markdown("<div class='infobox'>复盘不是形式，而是判断本批是否真正解决用户问题。建议每一批上线后都记录：做了什么、测了什么、发现了什么、下一步做什么。</div>", unsafe_allow_html=True)
+        batch_name = st.text_input("批次名称", value="Batch 63：核心场景修复与稳定性增强")
+        completed_items = st.text_area("本批完成事项", value="上传失败问题集中修复；AI作业批改稳定性增强；电商售后字段映射细化；高校就业报告可读性增强；手机端反馈入口优化；产品优化中心加入人工备注；任务状态变更记录。", height=120)
+        tests_summary = st.text_area("测试摘要", value="已进行Python语法编译检查；上传错误修复逻辑检查；作业批改文本抽取逻辑检查；电商/高校深度分析函数检查；任务备注与状态记录表结构检查。", height=110)
+        issues_found = st.text_area("发现的问题与处理", value="如用户真实上传的PDF为扫描件，当前仍需OCR；Streamlit Cloud对超大文件仍受平台限制；正式桌面版打包需在Windows环境实测。", height=110)
+        next_actions = st.text_area("下一步建议", value="继续收集真实用户上传失败样例；补OCR方案；优化作业批改的教师复核流程；将电商字段映射做成可编辑字典。", height=110)
+        if st.button("保存复盘报告", use_container_width=True):
+            conn = db_conn()
+            conn.execute("INSERT INTO iteration_retrospectives(batch_name, completed_items, tests_summary, issues_found, next_actions, created_at) VALUES (?, ?, ?, ?, ?, ?)", (batch_name, completed_items, tests_summary, issues_found, next_actions, datetime.now().isoformat()))
+            conn.commit(); conn.close()
+            st.success("复盘报告已保存。")
+        report = f"""# {batch_name} 复盘报告
+
+## 本批完成事项
+{completed_items}
+
+## 测试摘要
+{tests_summary}
+
+## 发现的问题与处理
+{issues_found}
+
+## 下一步建议
+{next_actions}
+
+生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+        st.download_button("下载本批复盘报告", report.encode("utf-8"), file_name="Aurevia_Batch63_复盘报告.md", mime="text/markdown", use_container_width=True, key="download_batch63_retrospective")
+        conn = db_conn()
+        saved = pd.read_sql_query("SELECT batch_name, created_at FROM iteration_retrospectives ORDER BY created_at DESC LIMIT 20", conn)
+        conn.close()
+        if not saved.empty:
+            st.markdown("#### 已保存复盘记录")
+            st.dataframe(saved, use_container_width=True)
+
+
+
+def render_one_person_operator_os():
+    st.markdown("## 一人公司运营中枢")
+    st.markdown("<div class='infobox'>本页不是普通功能页，而是你的个人产品运营操作台：把产品、设计、文案、研究、运营和迭代放进一个闭环里，确保你一个人也能稳步管理。</div>", unsafe_allow_html=True)
+
+    st.markdown("### 1. 关键结论：当前步骤需要加强的地方")
+    checks = pd.DataFrame([
+        {"检查项": "窄赛道聚焦", "当前判断": "仍然偏宽", "加强动作": "先聚焦电商售后、高校就业、AI作业批改三个核心场景", "优先级": "P0"},
+        {"检查项": "真实痛点", "当前判断": "已有样例，但真实用户验证不足", "加强动作": "每周至少找3名目标用户完成一次真实任务", "优先级": "P0"},
+        {"检查项": "用户主动传播", "当前判断": "还缺可分享交付物", "加强动作": "为每个场景生成可截图分享的成果卡片和汇报话术", "优先级": "P0"},
+        {"检查项": "AI提升效率", "当前判断": "已有AI Agent，但运营侧自动化不足", "加强动作": "让AI自动生成内容选题、用户访谈问题、迭代计划和复盘报告", "优先级": "P1"},
+        {"检查项": "数据反馈闭环", "当前判断": "已有行为和反馈记录", "加强动作": "建立每周固定复盘和指标阈值，不达标就调整产品", "优先级": "P0"},
+    ])
+    st.dataframe(checks, use_container_width=True)
+
+    st.markdown("### 2. 一人公司每周工作节奏")
+    weekly = pd.DataFrame([
+        {"星期": "周一", "主题": "产品复盘", "动作": "看反馈、行为数据、上传失败和用户卡点", "交付物": "本周优化优先级"},
+        {"星期": "周二", "主题": "核心场景打磨", "动作": "只修最影响首次成功的1-2个问题", "交付物": "小版本修复"},
+        {"星期": "周三", "主题": "用户访谈", "动作": "联系3个老师/运营/电商用户，让他们跑样例或真实数据", "交付物": "访谈记录"},
+        {"星期": "周四", "主题": "内容增长", "动作": "发布1篇案例文案或1条短视频脚本", "交付物": "可分享内容"},
+        {"星期": "周五", "主题": "AI运营自动化", "动作": "让AI生成迭代复盘、下周计划、客服FAQ和推广话术", "交付物": "运营周报"},
+        {"星期": "周末", "主题": "轻量测试", "动作": "自己从注册到样例报告跑一遍，记录卡点", "交付物": "产品体验清单"},
+    ])
+    st.dataframe(weekly, use_container_width=True)
+
+    st.markdown("### 3. 30 / 60 / 90 天执行路线")
+    roadmap = pd.DataFrame([
+        {"阶段": "0-30天", "目标": "证明产品真的有用", "关键动作": "聚焦三大场景，确保样例报告和真实上传流程稳定", "衡量指标": "首次成功率≥70%，3个真实用户完成任务"},
+        {"阶段": "31-60天", "目标": "让用户愿意复用", "关键动作": "做分享卡片、汇报话术、反馈闭环，围绕真实卡点迭代", "衡量指标": "复用用户≥5人，至少2个场景被反复使用"},
+        {"阶段": "61-90天", "目标": "形成独特定位", "关键动作": "确定最强窄赛道和核心传播话术，做案例库", "衡量指标": "形成3个可公开案例，用户主动推荐/转发"},
+    ])
+    st.dataframe(roadmap, use_container_width=True)
+
+    st.markdown("### 4. 增长内容选题库")
+    topics = pd.DataFrame([
+        {"目标用户": "电商客服主管", "标题": "一个售后Excel，3分钟看出哪个商品最容易退货", "形式": "图文/短视频", "传播点": "高频痛点+直观结果"},
+        {"目标用户": "高校辅导员", "标题": "就业数据别再手动汇总，AI自动生成未就业学生清单", "形式": "案例截图", "传播点": "省时间+可交付"},
+        {"目标用户": "高校老师", "标题": "50份作业批改到崩溃？先让AI做初筛和评语", "形式": "短视频", "传播点": "老师真实痛点"},
+        {"目标用户": "门店运营", "标题": "日报不是给老板看的表，而是找问题的雷达", "形式": "图文", "传播点": "经营判断"},
+        {"目标用户": "个人开发者", "标题": "我如何一个人把Excel工具做成AI效率平台", "形式": "复盘文章", "传播点": "一人公司故事"},
+    ])
+    st.dataframe(topics, use_container_width=True)
+
+    st.markdown("### 5. 每周必须看的指标")
+    metrics = pd.DataFrame([
+        {"指标": "首次成功率", "定义": "用户是否完成样例/上传/报告下载任一完整流程", "警戒线": "<60%", "动作": "简化首页和首次使用路径"},
+        {"指标": "上传失败率", "定义": "上传失败事件 / 上传尝试", "警戒线": ">20%", "动作": "优先修复文件读取和结构提示"},
+        {"指标": "样例报告点击率", "定义": "样例报告访问 / 首页访问", "警戒线": "<30%", "动作": "把样例入口放到首屏"},
+        {"指标": "AI使用率", "定义": "AI Agent使用事件 / 总用户", "警戒线": "<25%", "动作": "增加示例指令和场景化AI按钮"},
+        {"指标": "反馈提交数", "定义": "每周真实反馈数量", "警戒线": "<5条", "动作": "在结果页加入更醒目的反馈入口"},
+    ])
+    st.dataframe(metrics, use_container_width=True)
+
+    st.markdown("### 6. 执行按钮")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("生成本周运营周报", use_container_width=True):
+            report = """Aurevia 智策云｜本周运营周报\n\n1. 本周重点：聚焦三大核心场景，先提升首次成功率。\n2. 重点检查：上传失败、样例报告点击、AI Agent使用、用户反馈。\n3. 下周动作：找3名真实用户跑一次完整流程，优先修复阻断问题。\n4. 内容增长：发布1个电商售后或高校就业真实案例。\n"""
+            st.download_button("下载运营周报", report, file_name="Aurevia_本周运营周报.txt", mime="text/plain", use_container_width=True)
+    with c2:
+        if st.button("生成用户访谈提纲", use_container_width=True):
+            guide = """用户访谈提纲\n\n1. 你平时最耗时的数据/批改/报告工作是什么？\n2. 你第一次打开产品时是否知道下一步做什么？\n3. 样例报告是否让你明白产品价值？\n4. 上传自己的文件时卡在哪里？\n5. 生成的报告是否能直接用于工作？\n6. 如果只能保留一个功能，你希望保留什么？\n7. 你愿不愿意推荐给同事？为什么？\n"""
+            st.download_button("下载访谈提纲", guide, file_name="Aurevia_用户访谈提纲.txt", mime="text/plain", use_container_width=True)
+    with c3:
+        if st.button("生成下一批迭代建议", use_container_width=True):
+            plan = """下一批迭代建议\n\n优先级P0：\n- 修复上传失败和文件结构识别问题。\n- 三大核心场景报告再压缩到一屏可懂。\n- 增加可分享成果卡片。\n\n优先级P1：\n- AI自动生成推广文案。\n- AI根据用户反馈生成任务优先级。\n- 手机端样例报告视觉继续优化。\n"""
+            st.download_button("下载迭代建议", plan, file_name="Aurevia_下一批迭代建议.txt", mime="text/plain", use_container_width=True)
+
+
+
+def render_mobile_optimized_experience():
+    st.markdown("## 手机端完整优化版")
+    st.markdown("<div class='mobile-hero-mini'><h2>手机上也能一屏看懂结果</h2><p>本页用于验证手机端体验：入口更短、报告卡片更清楚、AI输入更适合触屏、大文件上传有明确提示。建议你用手机打开线上网址后重点测试本页。</p></div>", unsafe_allow_html=True)
+
+    st.markdown("### 手机端核心入口")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.button("查看样例报告", use_container_width=True)
+        st.button("打开 AI Agent", use_container_width=True)
+    with c2:
+        st.button("上传文件分析", use_container_width=True)
+        st.button("提交使用反馈", use_container_width=True)
+
+    st.markdown("### 一屏报告卡片")
+    cards = [
+        ("电商售后", "退款金额", "52,430 元", "发现 12 条高风险售后工单，建议优先处理高金额退款和响应超时。"),
+        ("高校就业", "就业落实率", "80.26%", "15 名学生仍待跟进，建议按专业和班级拆分帮扶。"),
+        ("AI作业批改", "班级平均分", "82.4", "3 份作业存在中高雷同风险，建议教师二次复核。"),
+    ]
+    cols = st.columns(3)
+    for col, (scene, label, value, advice) in zip(cols, cards):
+        with col:
+            st.markdown(f"""
+            <div class='mobile-report-card'>
+              <div class='label'>{scene}</div>
+              <div class='kpi'>{value}</div>
+              <div class='label'>{label}</div>
+              <p style='line-height:1.65;color:#475569;'>{advice}</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("### 移动端上传提示")
+    st.markdown("<div class='warnbox'>手机端更适合查看报告、使用 AI、提交反馈。大文件、ZIP 作业包、多个 Excel 批量上传建议在电脑端完成；如果必须手机上传，请优先上传小文件并等待处理完成。</div>", unsafe_allow_html=True)
+    st.markdown("### AI Agent 手机输入示例")
+    prompt = st.text_area("在手机上输入你的问题", placeholder="例如：帮我分析这份电商售后报告最应该关注什么？", height=120, key="mobile_ai_prompt")
+    if st.button("生成手机端 AI 示例回复", use_container_width=True):
+        st.markdown("<div class='ai-msg'>建议优先查看：①退款原因占比最高项；②商品售后风险排行；③高金额退款工单；④客服响应时长。若你上传真实数据，我会进一步生成可直接汇报的话术。</div>", unsafe_allow_html=True)
+
+
+def render_share_growth_center():
+    st.markdown("## 成果分享中心")
+    st.markdown("<div class='infobox'>目标：让用户的分析成果天然适合截图、转发和复盘，而不是生硬邀请好友。</div>", unsafe_allow_html=True)
+    scene = st.selectbox("选择分享场景", ["电商售后", "高校就业", "AI作业批改"], key="share_scene")
+    sample = {
+        "电商售后": ("哪个商品最容易退？", "用一份售后表，3分钟发现高风险商品和高金额退款工单。"),
+        "高校就业": ("未就业学生一键筛出", "就业数据不再手动汇总，院系报告自动生成。"),
+        "AI作业批改": ("50份作业先让AI初筛", "自动评分、评语、雷同风险和班级趋势，一次生成。"),
+    }[scene]
+    st.markdown(f"""
+    <div class='share-card-preview'>
+      <h3>{sample[0]}</h3>
+      <p>{sample[1]}</p>
+      <p>适合分享到：朋友圈 / 小红书 / 公众号 / 班级群 / 运营复盘群</p>
+    </div>
+    """, unsafe_allow_html=True)
+    captions = pd.DataFrame([
+        {"平台":"小红书", "文案":"今天用 Aurevia 智策云把一份复杂表格直接生成了问题清单和汇报摘要，终于不用手动整理到崩溃。"},
+        {"平台":"公众号", "文案":"一份结构化Excel背后，藏着用户真正的经营/教学痛点。AI不是替代人，而是先把重复劳动处理掉。"},
+        {"平台":"朋友圈", "文案":"试了一个数据分析小工具，上传表格就能生成摘要和问题清单，挺适合老师/运营/电商售后。"},
+    ])
+    st.dataframe(captions, use_container_width=True)
+    st.download_button("下载传播文案 CSV", captions.to_csv(index=False).encode("utf-8-sig"), file_name="Aurevia_传播文案.csv", mime="text/csv", use_container_width=True)
+
+
+def render_user_case_library():
+    st.markdown("## 用户案例库")
+    st.markdown("<div class='infobox'>案例库用于给新用户快速展示产品价值。现阶段先用样例案例，后续替换为真实匿名案例。</div>", unsafe_allow_html=True)
+    cases = pd.DataFrame([
+        {"场景":"电商售后", "用户":"电商运营", "痛点":"售后表字段乱、退款原因难统计", "结果":"生成退款原因排行、商品风险排行、高风险工单", "节省时间":"约2小时/周"},
+        {"场景":"高校就业", "用户":"辅导员", "痛点":"就业去向、实习单位、未就业名单要反复汇总", "结果":"生成专业就业率、未就业清单、院系汇报摘要", "节省时间":"约半天/次"},
+        {"场景":"AI作业批改", "用户":"课程老师", "痛点":"作业太多、评语重复、雷同难初筛", "结果":"生成评分表、评语、雷同风险、班级趋势", "节省时间":"约3小时/批"},
+    ])
+    st.dataframe(cases, use_container_width=True)
+    st.markdown("### 案例推荐给新用户的原则")
+    st.write("优先推荐：痛点清晰、结果直观、报告可截图、用户愿意转发的案例。")
+
+
+def render_share_analytics():
+    st.markdown("## 传播分析")
+    st.markdown("<div class='infobox'>当前是轻量模拟统计，后续可接入真实分享链接和 UTM 参数。</div>", unsafe_allow_html=True)
+    df = pd.DataFrame([
+        {"内容":"电商售后分享卡", "分享次数":12, "点击次数":48, "转化注册":3, "推荐动作":"继续优化电商字段映射和短视频脚本"},
+        {"内容":"高校就业案例", "分享次数":9, "点击次数":40, "转化注册":4, "推荐动作":"优先找辅导员和就业办试用"},
+        {"内容":"AI作业批改卡", "分享次数":15, "点击次数":63, "转化注册":6, "推荐动作":"制作老师批改前后对比案例"},
+    ])
+    st.dataframe(df, use_container_width=True)
+    try:
+        st.bar_chart(df.set_index("内容")[["分享次数", "点击次数", "转化注册"]])
+    except Exception:
+        pass
+    st.markdown("### AI 文案策略优化建议")
+    st.markdown("- 如果点击高但注册低：优化落地页首屏和立即体验入口。\n- 如果分享少：说明分享卡不够有冲击力，需要突出前后对比。\n- 如果转化集中在某个场景：优先深挖该场景，不要平均发力。")
+
+
 # ----------------------------
 # Main
 # ----------------------------
@@ -1910,6 +2927,14 @@ def main():
         render_sample_reports()
     elif page == "模板中心":
         render_templates()
+    elif page == "手机端优化":
+        render_mobile_optimized_experience()
+    elif page == "成果分享中心":
+        render_share_growth_center()
+    elif page == "用户案例库":
+        render_user_case_library()
+    elif page == "传播分析":
+        render_share_analytics()
     elif page == "AI推荐策略":
         render_ai_recommendation_strategy()
     elif page == "交互图表":
@@ -1920,6 +2945,10 @@ def main():
         render_ai_center()
     elif page == "AI作业批改":
         render_grading()
+    elif page == "一人公司运营中枢":
+        render_one_person_operator_os()
+    elif page == "产品优化中心":
+        render_product_iteration_center()
     elif page == "隐私与数据":
         render_privacy_data()
     elif page == "App与桌面版":
@@ -1939,6 +2968,7 @@ def main():
     elif page == "反馈":
         render_feedback()
     render_audit() if page == "首页" else None
+    render_bottom_utility_links()
     st.markdown(f"<div class='footer'>© 2026 {APP_NAME}｜免费开放核心功能｜联系：{CONTACT_EMAIL}</div>", unsafe_allow_html=True)
 
 

@@ -1,13 +1,10 @@
-# Mobile PWA Guide
+# Batch 66 Mobile PWA
 
-当前 Streamlit 页面可直接用手机浏览器访问。若要形成更完整 PWA，请在独立官网或前端中接入：
+手机使用方式：
 
-- manifest.webmanifest
-- service-worker.js
-- pwa_integration.html
+1. 手机浏览器打开 https://orbiretail-saas.streamlit.app/
+2. iPhone 点击分享按钮，选择“添加到主屏幕”
+3. Android 点击菜单，选择“添加到主屏幕/安装应用”
+4. 后续从桌面图标打开
 
-短期用户路径：
-1. 手机打开 https://orbiretail-saas.streamlit.app/
-2. 浏览器菜单
-3. 添加到主屏幕
-4. 像 App 一样打开
+建议：大文件上传、ZIP 作业包、批量 Excel 仍优先在电脑端完成。
