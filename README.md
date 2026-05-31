@@ -1,10 +1,9 @@
-# Batch 66 Mobile PWA
+# Desktop Wrapper
 
-手机使用方式：
+桌面端使用 Electron 封装线上网页。进入 `desktop/electron-wrapper` 后运行：
 
-1. 手机浏览器打开 https://orbiretail-saas.streamlit.app/
-2. iPhone 点击分享按钮，选择“添加到主屏幕”
-3. Android 点击菜单，选择“添加到主屏幕/安装应用”
-4. 后续从桌面图标打开
+```bat
+build_desktop_windows.bat
+```
 
-建议：大文件上传、ZIP 作业包、批量 Excel 仍优先在电脑端完成。
+生成的安装包在 `dist/` 目录。
