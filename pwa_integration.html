@@ -1,0 +1,8 @@
+<!-- 在独立官网或前端页面中加入 -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#163987">
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/service-worker.js');
+}
+</script>

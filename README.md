@@ -1,47 +1,13 @@
-# Batch 50：免费开放版 + 支付系统清除 + 产品专业审核
+# Mobile PWA Guide
 
-本版本按新的产品策略调整：
+当前 Streamlit 页面可直接用手机浏览器访问。若要形成更完整 PWA，请在独立官网或前端中接入：
 
-1. **清除收费系统**
-   - 删除订阅与支付入口。
-   - 删除支付回调与会员生命周期页面。
-   - 核心功能改为免费开放。
+- manifest.webmanifest
+- service-worker.js
+- pwa_integration.html
 
-2. **保留登录但不强制收费**
-   - 注册/登录仅用于保存反馈、AI 设置和历史分析记录。
-   - 用户无需支付即可使用核心模板和分析功能。
-
-3. **保留核心能力**
-   - 模板中心
-   - 数据分析工作台
-   - AI 智能中心
-   - AI 作业批改
-   - 用户反馈
-   - 系统后台
-
-4. **产品审核方向**
-   - 不以收费为第一目标。
-   - 优先提升用户真实效率、口碑和留存。
-   - 强化样例体验、AI解释、报告交付、隐私说明和场景深度。
-
-## 运行
-
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-## 部署到 Streamlit Cloud
-
-上传覆盖：
-
-```text
-app.py
-requirements.txt
-README.md
-.streamlit/config.toml
-```
-
-## 联系方式
-
-2790569814@qq.com
+短期用户路径：
+1. 手机打开 https://orbiretail-saas.streamlit.app/
+2. 浏览器菜单
+3. 添加到主屏幕
+4. 像 App 一样打开

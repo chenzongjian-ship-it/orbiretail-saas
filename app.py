@@ -6,12 +6,16 @@ import json
 import io
 import zipfile
 import requests
+try:
+    import plotly.express as px
+except Exception:
+    px = None
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 APP_NAME = "Aurevia 智策云"
-APP_SUBTITLE = "数据智能与AI效率平台"
+APP_SUBTITLE = "数据智能与AI效率平台｜Batch 61 AI推荐策略与体验数据分析"
 CONTACT_EMAIL = "2790569814@qq.com"
 DATA_DIR = Path("saas_data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -78,6 +82,40 @@ header {visibility: visible !important; background: transparent !important;}
 .ai-msg {background:#f8fbff; border:1px solid #dbeafe; border-radius:16px; padding:16px; line-height:1.75;}
 .small {font-size:13px; color:#64748b;}
 .footer {color:#64748b; font-size:13px; text-align:center; margin-top:30px;}
+
+@media (max-width: 768px) {
+  .block-container { padding: .75rem .85rem; }
+  .hero { padding: 22px 20px; border-radius: 22px; }
+  .hero h1 { font-size: 30px; line-height: 1.18; }
+  .hero p { font-size: 15px; line-height: 1.65; }
+  .card, .metric-card, .template-card { padding: 16px; border-radius: 18px; }
+  .mobile-card { padding: 16px !important; }
+  .desktop-only { display: none !important; }
+}
+.mobile-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid rgba(15,23,42,.08);
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow: 0 12px 32px rgba(15,23,42,.06);
+  margin-bottom: 12px;
+}
+.report-chip {
+  display:inline-block; padding:6px 10px; border-radius:999px;
+  background:#eef6ff; border:1px solid #bfdbfe; color:#1d4ed8; font-size:12px; margin-right:6px;
+}
+.step-card {
+  padding: 18px; border-radius: 20px; background:#ffffff;
+  border:1px solid #e5edf7; box-shadow:0 10px 26px rgba(15,23,42,.05);
+}
+
+
+.action-pill {display:inline-block; padding:7px 12px; border-radius:999px; background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe; font-size:13px; margin:3px 4px 3px 0;}
+.insight-card {background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); border:1px solid #dbeafe; border-radius:20px; padding:18px; box-shadow:0 12px 32px rgba(15,23,42,.06); margin-bottom:12px;}
+.recommend-card {background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 65%, #0f766e 100%); color:white; border-radius:24px; padding:24px; box-shadow:0 18px 50px rgba(15,23,42,.18);}
+.recommend-card p { color: rgba(255,255,255,.90); }
+.chart-panel {background:#ffffff; border:1px solid #e5edf7; border-radius:20px; padding:18px; box-shadow:0 10px 26px rgba(15,23,42,.05);}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -153,6 +191,31 @@ def init_db():
           score REAL,
           level TEXT,
           similarity_note TEXT,
+          created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS behavior_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT,
+          event_type TEXT,
+          page TEXT,
+          scenario TEXT,
+          detail TEXT,
+          created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS recommendation_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT,
+          top_scenario TEXT,
+          reason TEXT,
+          score REAL,
           created_at TEXT
         )
         """
@@ -377,6 +440,95 @@ def make_report_zip(df: pd.DataFrame, scenario: Dict[str, Any], result: Dict[str
         z.writestr("问题清单.csv", result["issues"].to_csv(index=False).encode("utf-8-sig"))
     return zip_buffer.getvalue()
 
+
+def metric_explanations(result: Dict[str, Any]) -> pd.DataFrame:
+    trust = result.get("trust", 0)
+    issue_count = len(result.get("issues", []))
+    rows = result.get("rows", 0)
+    total = result.get("total", 0.0)
+    level = "可信" if trust >= 80 else "需复核" if trust >= 60 else "不建议直接使用"
+    return pd.DataFrame([
+        {"指标": "记录数", "当前值": rows, "AI解释": "本次纳入分析的有效数据行数。行数过少时，结论只能作为初步参考。", "建议动作": "如果是正式报告，请确认是否已经上传全部文件。"},
+        {"指标": "关键金额合计", "当前值": f"{total:,.2f}", "AI解释": "系统根据识别到的金额、退款金额或薪资字段计算出的汇总值。不同场景下含义不同。", "建议动作": "核对金额字段是否映射正确，必要时补充字段别名。"},
+        {"指标": "问题数", "当前值": issue_count, "AI解释": "问题数越多，说明字段缺失、空值或格式异常越多。", "建议动作": "优先下载问题清单，将问题发给数据提交人修正。"},
+        {"指标": "数据可信度", "当前值": f"{trust}/100（{level}）", "AI解释": "综合字段完整度、异常数量和金额可解析情况得出的辅助评分。", "建议动作": "80分以上可进入汇报草稿；60-79分建议复核；低于60分不建议直接用于正式决策。"},
+    ])
+
+
+def auto_feedback_category(text: str) -> str:
+    t = (text or "").lower()
+    rules = [
+        ("上传/文件问题", ["上传", "文件", "excel", "csv", "word", "pdf", "zip", "打不开", "读取"]),
+        ("AI结果问题", ["ai", "模型", "回答", "评语", "摘要", "幻觉", "不准"]),
+        ("模板/字段建议", ["模板", "字段", "映射", "场景", "列名", "表头"]),
+        ("报告/下载问题", ["报告", "下载", "导出", "zip", "excel", "清单"]),
+        ("界面体验", ["界面", "按钮", "导航", "不好看", "卡", "慢", "回弹"]),
+    ]
+    for name, kws in rules:
+        if any(k in t for k in kws):
+            return name
+    return "其他"
+
+
+def upload_repair_tips(error_logs: List[Dict[str, str]]) -> pd.DataFrame:
+    if not error_logs:
+        return pd.DataFrame(columns=["问题", "可能原因", "自助修复建议"])
+    rows = []
+    for e in error_logs:
+        msg = e.get("错误", "")
+        if "No such" in msg or "not found" in msg:
+            rows.append({"问题": e.get("文件名", "未知文件"), "可能原因": "文件路径或文件名异常", "自助修复建议": "重新选择文件上传，避免文件名含特殊符号。"})
+        elif "Excel" in msg or "workbook" in msg or "format" in msg:
+            rows.append({"问题": e.get("文件名", "未知文件"), "可能原因": "Excel格式不规范或文件损坏", "自助修复建议": "用Excel重新打开并另存为 .xlsx 后再上传。"})
+        elif "Unicode" in msg or "codec" in msg:
+            rows.append({"问题": e.get("文件名", "未知文件"), "可能原因": "CSV编码不兼容", "自助修复建议": "将CSV另存为 UTF-8 编码，或改用 .xlsx 上传。"})
+        else:
+            rows.append({"问题": e.get("文件名", "未知文件"), "可能原因": "文件结构、权限或格式异常", "自助修复建议": "检查第一行是否为表头；删除合并单元格；保留结构化表格后重试。"})
+    return pd.DataFrame(rows)
+
+
+def read_uploaded_files_with_logs(files: List[Any]):
+    frames, logs, errors = [], [], []
+    for f in files:
+        try:
+            if f.name.lower().endswith(".csv"):
+                df = pd.read_csv(f)
+            else:
+                df = pd.read_excel(f)
+            df["来源文件"] = f.name
+            frames.append(df)
+            logs.append({"文件名": f.name, "状态": "读取成功", "行数": len(df), "列数": len(df.columns), "错误": ""})
+        except Exception as e:
+            logs.append({"文件名": f.name, "状态": "读取失败", "行数": 0, "列数": 0, "错误": str(e)})
+            errors.append({"文件名": f.name, "错误": str(e)})
+    data = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    return data, pd.DataFrame(logs), upload_repair_tips(errors)
+
+
+def make_assignment_sample_report_zip() -> bytes:
+    students = ["李明", "王婷", "陈宇", "赵悦", "周航", "黄琳"]
+    scores = [91, 86, 73, 58, 94, 61]
+    rows = []
+    for name, score in zip(students, scores):
+        level = "优秀" if score >= 85 else "良好" if score >= 75 else "及格" if score >= 60 else "需重点辅导"
+        sim = "疑似雷同：与赵悦相似度82%" if name == "陈宇" else "无明显雷同"
+        history = "表扬：多次高分，表现稳定" if score >= 90 else "警告：连续低分，建议跟进" if score < 60 else "正常"
+        rows.append({"学生": name, "作业类型": "课程论文", "得分": score, "等级": level, "雷同标注": sim, "历史表现": history, "AI评语": f"该生本次作业为{level}，建议继续完善论证、案例和结构表达。"})
+    df = pd.DataFrame(rows)
+    summary = pd.DataFrame([{
+        "班级": "演示班级", "平均分": df["得分"].mean(), "优秀人数": int((df["得分"]>=85).sum()), "低分风险人数": int((df["得分"]<60).sum()), "疑似雷同数量": int(df["雷同标注"].str.contains("疑似").sum())
+    }])
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="AI批改结果", index=False)
+        summary.to_excel(writer, sheet_name="班级分析", index=False)
+        pd.DataFrame([{ "指标": "平均分", "解释": "反映班级整体作业完成质量。"}, {"指标": "疑似雷同", "解释": "仅为辅助筛查，需要教师人工复核。"}]).to_excel(writer, sheet_name="指标解释", index=False)
+    zbuf = io.BytesIO()
+    with zipfile.ZipFile(zbuf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("AI作业批改完整样例报告.xlsx", out.getvalue())
+        z.writestr("AI作业批改摘要.txt", "本样例展示了AI辅助评分、深度评语、疑似雷同标注、历史表现提醒和班级风险分析。")
+    return zbuf.getvalue()
+
 # ----------------------------
 # AI
 # ----------------------------
@@ -397,6 +549,116 @@ def secret_get(name: str) -> str:
     except Exception:
         return ""
 
+
+
+
+def log_event(event_type: str, page: str = "", scenario: str = "", detail: Optional[Dict[str, Any]] = None):
+    """Record lightweight product usage events for recommendation strategy and UX improvement."""
+    try:
+        conn = db_conn()
+        conn.execute(
+            "INSERT INTO behavior_events(user_email, event_type, page, scenario, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (current_email() if is_logged_in() else "guest", event_type, page or st.session_state.get("page", ""), scenario or "", json.dumps(detail or {}, ensure_ascii=False), datetime.now().isoformat()),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def load_behavior_events(limit: int = 500) -> pd.DataFrame:
+    try:
+        conn = db_conn()
+        df = pd.read_sql_query("SELECT * FROM behavior_events ORDER BY created_at DESC LIMIT ?", conn, params=(limit,))
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["id", "user_email", "event_type", "page", "scenario", "detail", "created_at"])
+
+
+def safe_read_analysis_history() -> pd.DataFrame:
+    try:
+        conn = db_conn()
+        df = pd.read_sql_query("SELECT * FROM analysis_history ORDER BY created_at DESC", conn)
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["scenario", "rows_count", "trust_score", "issue_count", "created_at"])
+
+
+def scenario_recommendation_scores() -> pd.DataFrame:
+    hist = safe_read_analysis_history()
+    events = load_behavior_events(1000)
+    rows = []
+    for s in SCENARIOS:
+        name = s["name"]
+        h = hist[hist.get("scenario", pd.Series(dtype=str)).astype(str) == name] if not hist.empty else pd.DataFrame()
+        e = events[events.get("scenario", pd.Series(dtype=str)).astype(str) == name] if not events.empty else pd.DataFrame()
+        usage_count = len(h) + len(e)
+        avg_trust = float(h["trust_score"].mean()) if not h.empty and "trust_score" in h else 78.0
+        avg_issues = float(h["issue_count"].mean()) if not h.empty and "issue_count" in h else 1.5
+        recency_bonus = min(8, len(h.head(3)) * 2) if not h.empty else 0
+        strategic_bonus = 10 if any(k in name for k in ["电商", "高校", "作业"]) else 4
+        score = usage_count * 4 + avg_trust * 0.45 - avg_issues * 3 + recency_bonus + strategic_bonus
+        if "电商" in name:
+            reason = "适合互联网/电商团队，能直接处理退换货、售后工单、客服效率和商品风险。"
+        elif "高校" in name:
+            reason = "适合院系、就业办和辅导员，能输出就业率、未就业清单和院系汇总。"
+        elif "作业" in name:
+            reason = "适合教师减轻批改压力，能输出评分、评语、雷同风险和班级预警。"
+        elif usage_count > 0:
+            reason = "用户已经使用过该场景，建议继续深化模板和报告表现。"
+        else:
+            reason = "作为通用补充模板，可根据用户上传字段进一步推荐。"
+        rows.append({"场景": name, "分类": s["category"], "推荐分": round(score, 2), "历史使用": usage_count, "平均可信度": round(avg_trust, 1), "平均问题数": round(avg_issues, 1), "推荐理由": reason})
+    return pd.DataFrame(rows).sort_values("推荐分", ascending=False).reset_index(drop=True)
+
+
+def generate_product_optimization_suggestions() -> pd.DataFrame:
+    events = load_behavior_events(1000)
+    hist = safe_read_analysis_history()
+    suggestions = []
+    if events.empty and hist.empty:
+        suggestions.append({"优先级": "P0", "问题/机会": "真实行为数据不足", "建议动作": "继续引导用户先使用样例报告、再上传真实文件，并鼓励提交反馈。", "依据": "暂无行为数据"})
+    else:
+        page_counts = events["page"].value_counts().to_dict() if not events.empty and "page" in events else {}
+        scenario_counts = hist["scenario"].value_counts().to_dict() if not hist.empty and "scenario" in hist else {}
+        if scenario_counts:
+            top_scene = max(scenario_counts, key=scenario_counts.get)
+            suggestions.append({"优先级": "P0", "问题/机会": f"{top_scene} 使用最多", "建议动作": "优先打磨该场景的样例报告、字段修复向导和AI摘要。", "依据": f"历史分析 {scenario_counts[top_scene]} 次"})
+        if "样例报告库" not in page_counts:
+            suggestions.append({"优先级": "P1", "问题/机会": "样例报告访问不足", "建议动作": "在首页和首次使用向导中进一步突出样例报告入口。", "依据": "页面访问行为"})
+        if not hist.empty and hist["issue_count"].mean() >= 3:
+            suggestions.append({"优先级": "P0", "问题/机会": "用户上传数据问题偏多", "建议动作": "强化字段缺失修复向导、表头检测和文件结构提示。", "依据": f"平均问题数 {hist['issue_count'].mean():.1f}"})
+        if not hist.empty and hist["trust_score"].mean() < 75:
+            suggestions.append({"优先级": "P0", "问题/机会": "数据可信度偏低", "建议动作": "增加上传前模板校验、缺字段提醒和样例字段对照表。", "依据": f"平均可信度 {hist['trust_score'].mean():.1f}"})
+        if len(suggestions) < 3:
+            suggestions.append({"优先级": "P1", "问题/机会": "AI Agent 使用路径可继续缩短", "建议动作": "在报告页加入‘让AI解释本页结果’和‘生成汇报话术’按钮。", "依据": "产品体验评审"})
+    return pd.DataFrame(suggestions)
+
+
+def automated_usage_report_text() -> str:
+    events = load_behavior_events(1000)
+    hist = safe_read_analysis_history()
+    total_events = len(events)
+    total_analysis = len(hist)
+    top_scene = hist["scenario"].value_counts().idxmax() if not hist.empty and "scenario" in hist and len(hist["scenario"].dropna()) else "暂无"
+    avg_trust = hist["trust_score"].mean() if not hist.empty and "trust_score" in hist else 0
+    avg_issues = hist["issue_count"].mean() if not hist.empty and "issue_count" in hist else 0
+    return f"""Aurevia 智策云自动化使用报告
+
+1. 行为事件总数：{total_events}
+2. 历史分析次数：{total_analysis}
+3. 当前最常用场景：{top_scene}
+4. 平均数据可信度：{avg_trust:.1f}
+5. 平均问题数：{avg_issues:.1f}
+
+产品判断：
+- 如果最常用场景集中在电商/高校/作业批改，说明核心方向正在形成。
+- 如果平均问题数偏高，应继续优化上传前字段提示和修复向导。
+- 如果样例报告访问较少，应在首页增加样例报告引导。
+- 如果AI中心访问较高，应继续加强AI解释、推荐和客服能力。
+"""
 
 def save_ai_settings(email: str, provider: str, model: str, base_url: str, secret_name: str):
     conn = db_conn()
@@ -454,10 +716,11 @@ def run_ai(prompt: str, provider: Optional[str] = None) -> str:
 # ----------------------------
 # Layout / Navigation
 # ----------------------------
-NAV_PAGES = ["首页", "工作台", "模板中心", "AI智能中心", "AI作业批改", "系统后台", "反馈"]
+NAV_PAGES = ["首页", "首次使用向导", "工作台", "场景配置向导", "样例报告库", "模板中心", "AI推荐策略", "交互图表", "体验数据分析", "AI智能中心", "AI作业批改", "隐私与数据", "App与桌面版", "桌面版启动页", "移动端体验", "PWA安装引导", "协议与政策", "上架前检查", "系统后台", "反馈"]
 
 def set_page(page: str):
     st.session_state.page = page
+    log_event("page_view", page=page)
     st.rerun()
 
 
@@ -551,6 +814,8 @@ def render_result(df: pd.DataFrame, scenario: Dict[str, Any], result: Dict[str, 
     st.progress(result["trust"] / 100)
     st.markdown("#### AI / 规则诊断摘要")
     st.info(result["summary"])
+    st.markdown("#### AI 解释每个指标")
+    st.dataframe(metric_explanations(result), use_container_width=True)
     st.markdown("#### 字段识别")
     st.dataframe(result["field_map"], use_container_width=True)
     if len(result["issues"]):
@@ -559,16 +824,101 @@ def render_result(df: pd.DataFrame, scenario: Dict[str, Any], result: Dict[str, 
     with st.expander("查看原始数据", expanded=False):
         st.dataframe(df, use_container_width=True)
     report_zip = make_report_zip(df, scenario, result)
-    st.download_button("下载报告包 ZIP", data=report_zip, file_name=f"Aurevia_{scenario['name']}_报告包.zip", mime="application/zip", use_container_width=True, key="download_report_zip")
+    st.download_button("下载报告包 ZIP", data=report_zip, file_name=f"Aurevia_{scenario['name']}_报告包.zip", mime="application/zip", use_container_width=True, key=f"download_report_zip_{scenario['name']}")
 
 
 def record_history(scenario: str, result: Dict[str, Any]):
+    log_event("analysis_completed", scenario=scenario, detail={"rows": result.get("rows"), "trust": result.get("trust"), "issues": len(result.get("issues", []))})
     if not is_logged_in():
         return
     conn = db_conn()
     conn.execute("INSERT INTO analysis_history(user_email, scenario, rows_count, trust_score, issue_count, created_at) VALUES (?, ?, ?, ?, ?, ?)", (current_email(), scenario, result["rows"], result["trust"], len(result["issues"]), datetime.now().isoformat()))
     conn.commit()
     conn.close()
+
+
+
+
+def render_first_success_guide():
+    st.markdown("## 首次使用向导")
+    st.markdown("<div class='infobox'>目标：让新用户不用摸索，5分钟内完成第一次成功体验。</div>", unsafe_allow_html=True)
+    steps = pd.DataFrame([
+        {"步骤": "1. 选择场景", "要做什么": "从电商售后、高校就业、AI作业批改等场景中选一个。", "成功标准": "知道自己要解决的问题属于哪个模板。"},
+        {"步骤": "2. 先看样例", "要做什么": "进入样例报告库，先下载完整样例报告。", "成功标准": "看到产品最终能输出什么。"},
+        {"步骤": "3. 上传自己的文件", "要做什么": "上传结构化 Excel / CSV，第一行尽量是表头。", "成功标准": "系统能识别字段并生成结果。"},
+        {"步骤": "4. 查看问题清单", "要做什么": "先处理缺字段、空值、金额异常、状态缺失等问题。", "成功标准": "知道数据哪里需要修。"},
+        {"步骤": "5. 下载报告包", "要做什么": "下载 Excel 报告、摘要和问题清单。", "成功标准": "能把报告用于复盘、汇报或沟通。"},
+        {"步骤": "6. 提交反馈", "要做什么": "告诉我们哪里卡住、哪里不够好。", "成功标准": "产品能继续按真实问题优化。"},
+    ])
+    st.dataframe(steps, use_container_width=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("去样例报告库", use_container_width=True):
+            set_page("样例报告库")
+    with c2:
+        if st.button("去工作台上传", use_container_width=True):
+            set_page("工作台")
+    with c3:
+        if st.button("去反馈", use_container_width=True):
+            set_page("反馈")
+
+
+def sample_report_card(title: str, scenario_keyword: str, desc: str):
+    scenario = next(s for s in SCENARIOS if scenario_keyword in s["name"])
+    df = demo_data(scenario["name"])
+    result = analyze_df(df, scenario)
+    st.markdown(f"### {title}")
+    st.write(desc)
+    render_result(df, scenario, result)
+
+
+def render_sample_reports():
+    st.markdown("## 样例报告库")
+    st.markdown("<div class='successbox'>无需准备数据，直接查看完整样例报告。它的作用是让用户先看见价值，再上传真实文件。</div>", unsafe_allow_html=True)
+    tabs = st.tabs(["电商售后完整样例报告", "高校就业完整样例报告", "AI作业批改完整样例报告"])
+    with tabs[0]:
+        sample_report_card("电商售后完整样例报告", "电商", "覆盖退款原因分布、商品售后表现、客服处理效率、高风险工单和问题清单。")
+    with tabs[1]:
+        sample_report_card("高校就业完整样例报告", "高校", "覆盖实习单位汇总、就业去向、专业/班级就业率、薪资区间和未就业清单。")
+    with tabs[2]:
+        st.markdown("### AI作业批改完整样例报告")
+        st.write("覆盖评分、深度评语、疑似雷同标注、历史表现提醒和班级风险分析。")
+        st.download_button("下载 AI 作业批改完整样例报告包", data=make_assignment_sample_report_zip(), file_name="AI作业批改完整样例报告包.zip", mime="application/zip", use_container_width=True, key="sample_grading_report_zip")
+        demo = pd.DataFrame([
+            {"学生": "李明", "得分": 91, "等级": "优秀", "历史表现": "表扬：多次高分", "AI评语": "结构完整，论证充分，可作为优秀样例。"},
+            {"学生": "陈宇", "得分": 73, "等级": "及格", "历史表现": "正常", "AI评语": "观点基本清晰，但案例支撑不足。"},
+            {"学生": "赵悦", "得分": 58, "等级": "需重点辅导", "历史表现": "警告：连续低分", "AI评语": "结构不完整，反思不足，建议教师重点跟进。"},
+        ])
+        st.dataframe(demo, use_container_width=True)
+
+
+def render_privacy_data():
+    st.markdown("## 隐私说明与数据删除")
+    st.markdown("<div class='infobox'>你的产品涉及学生作业、就业数据、电商订单和经营数据，因此隐私说明必须清楚、克制、可执行。</div>", unsafe_allow_html=True)
+    st.markdown("""
+### 我们建议对用户明确说明
+- 上传文件仅用于当前分析与报告生成。
+- 不建议上传身份证号、银行卡号、详细住址等与分析无关的敏感信息。
+- AI 批改结果仅作为教师辅助参考，不替代教师最终判断。
+- 如用户要求删除数据，应提供明确的删除入口。
+""")
+    if not is_logged_in():
+        st.warning("请先登录，才能删除账号相关数据。访客模式下可直接刷新页面清空临时结果。")
+        return
+    if st.button("清空当前会话分析结果", use_container_width=True):
+        st.session_state.last_result = None
+        st.session_state.last_df = None
+        st.session_state.last_scenario = None
+        st.success("当前会话分析结果已清空。")
+    if st.button("删除我的历史分析记录和反馈", use_container_width=True):
+        conn = db_conn()
+        email = current_email()
+        conn.execute("DELETE FROM analysis_history WHERE user_email=?", (email,))
+        conn.execute("DELETE FROM feedback WHERE user_email=?", (email,))
+        conn.execute("DELETE FROM ai_settings WHERE user_email=?", (email,))
+        conn.commit()
+        conn.close()
+        st.success("已删除你的历史分析记录、反馈和AI设置。账号本身仍保留，如需删除账号请联系管理员。")
 
 
 def render_workspace():
@@ -581,6 +931,7 @@ def render_workspace():
         if st.button("生成演示数据并分析", use_container_width=True):
             df = demo_data(scenario["name"])
             result = analyze_df(df, scenario)
+            log_event("demo_analysis", page="工作台", scenario=scenario["name"], detail={"rows": len(df)})
             st.session_state.last_df = df
             st.session_state.last_result = result
             st.session_state.last_scenario = scenario
@@ -590,7 +941,9 @@ def render_workspace():
         uploaded = st.file_uploader("上传 Excel / CSV，可多选", type=["xlsx", "csv"], accept_multiple_files=True)
         if st.button("分析上传文件", use_container_width=True):
             if uploaded:
-                df = read_uploaded_files(uploaded)
+                df, upload_log, repair_tips = read_uploaded_files_with_logs(uploaded)
+                st.session_state.upload_log = upload_log
+                st.session_state.repair_tips = repair_tips
                 if len(df):
                     result = analyze_df(df, scenario)
                     st.session_state.last_df = df
@@ -598,14 +951,26 @@ def render_workspace():
                     st.session_state.last_scenario = scenario
                     record_history(scenario["name"], result)
                     st.rerun()
+                else:
+                    st.warning("上传文件未能成功读取，请查看下方自助修复提示。")
             else:
                 st.warning("请先上传文件，或直接使用演示数据。")
+    if st.session_state.get("upload_log") is not None:
+        with st.expander("上传文件日志", expanded=False):
+            st.dataframe(st.session_state.upload_log, use_container_width=True)
+    if st.session_state.get("repair_tips") is not None and len(st.session_state.repair_tips):
+        st.markdown("#### 上传错误自助修复提示")
+        st.dataframe(st.session_state.repair_tips, use_container_width=True)
     if st.session_state.last_result is not None:
         render_result(st.session_state.last_df, st.session_state.last_scenario, st.session_state.last_result)
 
 
 def render_templates():
     st.markdown("## 模板中心")
+    rec_df = scenario_recommendation_scores()
+    if not rec_df.empty:
+        top = rec_df.iloc[0]
+        st.markdown(f"<div class='infobox'>AI 推荐优先尝试：<b>{top['场景']}</b>。理由：{top['推荐理由']}</div>", unsafe_allow_html=True)
     categories = ["全部"] + sorted(set(s["category"] for s in SCENARIOS))
     cat = st.selectbox("分类筛选", categories)
     kw = st.text_input("搜索模板", placeholder="例如：电商、就业、作业、库存、费用")
@@ -688,15 +1053,17 @@ def render_grading():
 
 def render_feedback():
     st.markdown("## 用户反馈")
-    category = st.selectbox("反馈类型", ["使用卡点", "模板建议", "AI结果问题", "功能建议", "其他"])
-    content = st.text_area("反馈内容", height=180)
+    content = st.text_area("反馈内容", height=180, placeholder="例如：上传文件失败、AI回答不准、模板字段不够、报告下载有问题、界面导航卡顿……")
+    suggested = auto_feedback_category(content) if content.strip() else "其他"
+    st.caption(f"系统自动分类建议：{suggested}")
+    category = st.selectbox("反馈类型", ["上传/文件问题", "AI结果问题", "模板/字段建议", "报告/下载问题", "界面体验", "其他"], index=["上传/文件问题", "AI结果问题", "模板/字段建议", "报告/下载问题", "界面体验", "其他"].index(suggested) if suggested in ["上传/文件问题", "AI结果问题", "模板/字段建议", "报告/下载问题", "界面体验", "其他"] else 5)
     if st.button("提交反馈", use_container_width=True):
         if content.strip():
             conn = db_conn()
             conn.execute("INSERT INTO feedback(user_email, category, content, created_at) VALUES (?, ?, ?, ?)", (current_email(), category, content, datetime.now().isoformat()))
             conn.commit()
             conn.close()
-            st.success("反馈已提交，感谢你帮助产品变得更好。")
+            st.success("反馈已提交，并已完成自动分类。感谢你帮助产品变得更好。")
         else:
             st.warning("请填写反馈内容。")
     st.info(f"遇到无法解决的问题，也可以联系：{CONTACT_EMAIL}")
@@ -707,7 +1074,7 @@ def render_admin():
     if not is_logged_in() or current_email() != CONTACT_EMAIL:
         st.warning("仅管理员可访问后台。")
         return
-    tab1, tab2, tab3 = st.tabs(["用户", "反馈", "分析记录"])
+    tab1, tab2, tab3, tab4 = st.tabs(["用户", "反馈", "分析记录", "行为数据"])
     conn = db_conn()
     with tab1:
         users = pd.read_sql_query("SELECT email, organization, role, created_at FROM users ORDER BY created_at DESC", conn)
@@ -718,6 +1085,12 @@ def render_admin():
     with tab3:
         hist = pd.read_sql_query("SELECT * FROM analysis_history ORDER BY created_at DESC", conn)
         st.dataframe(hist, use_container_width=True)
+    with tab4:
+        try:
+            events = pd.read_sql_query("SELECT * FROM behavior_events ORDER BY created_at DESC LIMIT 500", conn)
+            st.dataframe(events, use_container_width=True)
+        except Exception:
+            st.info("暂无行为数据。")
     conn.close()
 
 
@@ -738,14 +1111,783 @@ def render_audit():
 7. **减少复杂按钮**：主界面只保留高频入口；高级功能放到后台或设置页。
 
 ### 建议下一个版本
-Batch 51：免费版体验打磨 + 样例报告库 + 用户首次成功路径优化
-- 3个强样例：电商售后、高校就业、门店经营
-- 一键生成完整报告包
+Batch 51 已落实：免费版体验打磨 + 样例报告库 + 用户首次成功路径优化
+- 电商售后、高校就业、AI作业批改三个完整样例报告
+- 首次使用向导
 - AI解释每个指标
-- 用户反馈自动分类
-- 文件上传错误自助修复提示
+- 反馈自动分类
+- 上传错误自助修复提示
+- 隐私说明与数据删除入口
         """
     )
+
+
+
+# ============================================================
+# Batch 52：三大核心场景深度打磨
+# ============================================================
+
+def inspect_file_structure(df: pd.DataFrame) -> pd.DataFrame:
+    """增强上传文件结构检测：帮助用户在分析前发现表格结构问题。"""
+    rows = []
+    total_rows, total_cols = len(df), len(df.columns)
+    duplicated = [c for c in df.columns[df.columns.duplicated()].tolist()]
+    empty_cols = [c for c in df.columns if df[c].isna().all()]
+    unnamed_cols = [c for c in df.columns if str(c).lower().startswith('unnamed') or str(c).strip()==""]
+    null_ratio = float(df.isna().mean().mean()) if total_cols else 1.0
+    numeric_cols = []
+    for c in df.columns:
+        s = pd.to_numeric(df[c], errors='coerce')
+        if s.notna().sum() >= max(1, int(total_rows * 0.6)):
+            numeric_cols.append(c)
+    checks = [
+        ("表格行数", total_rows, "正常" if total_rows > 0 else "异常", "至少应包含1行有效数据。"),
+        ("表格列数", total_cols, "正常" if total_cols >= 2 else "需复核", "建议至少包含2列以上结构化字段。"),
+        ("重复列名", len(duplicated), "需复核" if duplicated else "正常", "如存在重复列名，请修改为唯一表头。"),
+        ("空白列", len(empty_cols), "需清理" if empty_cols else "正常", "删除全空列，可提升字段识别准确率。"),
+        ("未命名列", len(unnamed_cols), "需清理" if unnamed_cols else "正常", "通常由空表头、合并单元格或导出格式异常造成。"),
+        ("总体空值比例", f"{null_ratio*100:.1f}%", "需复核" if null_ratio > 0.25 else "正常", "空值比例过高会影响汇总和诊断。"),
+        ("疑似数值列", len(numeric_cols), "正常" if numeric_cols else "需复核", "金额、薪资、时长、库存等字段应能被解析为数字。"),
+    ]
+    for item, value, status, suggestion in checks:
+        rows.append({"检测项": item, "当前值": value, "状态": status, "建议": suggestion})
+    return pd.DataFrame(rows)
+
+
+def ecommerce_deep_analysis(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+    reason_col = find_col(df, "退款原因")
+    product_col = find_col(df, "商品")
+    channel_col = find_col(df, "渠道")
+    status_col = find_col(df, "处理状态")
+    amount_col = find_col(df, "退款金额") or find_col(df, "金额")
+    service_col = find_col(df, "客服") or find_col(df, "销售人员")
+    duration_col = "处理时长" if "处理时长" in df.columns else None
+    amount = pd.to_numeric(df[amount_col], errors="coerce").fillna(0) if amount_col else pd.Series([0]*len(df))
+    outputs = {}
+    if reason_col:
+        outputs["退款原因深度分析"] = df.assign(_金额=amount).groupby(reason_col, dropna=False).agg(工单数=(reason_col,"count"),退款金额=("_金额","sum")).reset_index().sort_values("工单数", ascending=False)
+    if product_col:
+        outputs["商品售后风险排行"] = df.assign(_金额=amount).groupby(product_col, dropna=False).agg(售后次数=(product_col,"count"),退款金额=("_金额","sum")).reset_index().sort_values(["退款金额","售后次数"], ascending=False)
+    if channel_col:
+        outputs["渠道售后表现"] = df.assign(_金额=amount).groupby(channel_col, dropna=False).agg(售后工单=(channel_col,"count"),退款金额=("_金额","sum")).reset_index().sort_values("退款金额", ascending=False)
+    if service_col:
+        tmp = df.assign(_金额=amount)
+        aggs = {"处理工单": (service_col, "count"), "涉及退款": ("_金额", "sum")}
+        if duration_col:
+            tmp["_时长"] = pd.to_numeric(tmp[duration_col], errors="coerce")
+            aggs["平均处理时长"] = ("_时长", "mean")
+        outputs["客服处理效率"] = tmp.groupby(service_col, dropna=False).agg(**aggs).reset_index()
+    high = df.copy()
+    high["_退款金额"] = amount
+    risk_reason = []
+    if status_col:
+        risk_reason.append(high[status_col].astype(str).str.contains("超时|处理中|未处理|待处理", regex=True, na=False))
+    if duration_col:
+        risk_reason.append(pd.to_numeric(high[duration_col], errors="coerce").fillna(0) >= 48)
+    risk_reason.append(high["_退款金额"] >= max(300, high["_退款金额"].quantile(0.8) if len(high) else 300))
+    mask = risk_reason[0]
+    for m in risk_reason[1:]:
+        mask = mask | m
+    risk = high[mask].copy()
+    if len(risk):
+        risk["风险标注"] = "高金额/超时/未完结，建议优先复核"
+        outputs["高风险售后工单"] = risk.drop(columns=["_退款金额"], errors="ignore")
+    else:
+        outputs["高风险售后工单"] = pd.DataFrame([{"结论":"未识别到明显高风险工单"}])
+    return outputs
+
+
+def education_deep_analysis(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+    college_col = find_col(df, "学院")
+    major_col = find_col(df, "专业")
+    class_col = find_col(df, "班级")
+    status_col = find_col(df, "就业状态")
+    salary_col = find_col(df, "薪资")
+    unit_col = find_col(df, "实习单位") or find_col(df, "就业单位")
+    industry_col = find_col(df, "行业")
+    name_col = find_col(df, "姓名")
+    outputs = {}
+    def is_done(s):
+        return s.astype(str).str.contains("已就业|升学|实习|签约|录用|创业", regex=True, na=False)
+    if status_col:
+        outputs["就业去向统计"] = df[status_col].astype(str).value_counts(dropna=False).reset_index().rename(columns={"index":"就业状态", status_col:"人数"})
+    group_fields = [c for c in [college_col, major_col, class_col] if c]
+    if status_col and group_fields:
+        tmp = df.copy()
+        tmp["_已落实"] = is_done(tmp[status_col]).astype(int)
+        if salary_col:
+            tmp["_薪资"] = pd.to_numeric(tmp[salary_col], errors="coerce").fillna(0)
+            outputs["专业班级就业率"] = tmp.groupby(group_fields, dropna=False).agg(学生数=(status_col,"count"),已落实人数=("_已落实","sum"),平均薪资=("_薪资","mean")).reset_index()
+        else:
+            outputs["专业班级就业率"] = tmp.groupby(group_fields, dropna=False).agg(学生数=(status_col,"count"),已落实人数=("_已落实","sum")).reset_index()
+        outputs["专业班级就业率"]["落实率"] = outputs["专业班级就业率"]["已落实人数"] / outputs["专业班级就业率"]["学生数"].clip(lower=1)
+    if industry_col:
+        outputs["岗位行业分布"] = df[industry_col].astype(str).value_counts(dropna=False).reset_index().rename(columns={"index":"行业", industry_col:"人数"})
+    if unit_col:
+        outputs["实习就业单位汇总"] = df[unit_col].astype(str).value_counts(dropna=False).reset_index().rename(columns={"index":"单位", unit_col:"人数"})
+    if salary_col:
+        salary = pd.to_numeric(df[salary_col], errors="coerce").fillna(0)
+        bins = [-1,0,3000,5000,8000,12000,20000,10**9]
+        labels = ["未填写/无薪资","0-3000","3000-5000","5000-8000","8000-12000","12000-20000","20000+"]
+        outputs["薪资区间统计"] = pd.cut(salary, bins=bins, labels=labels).value_counts().sort_index().reset_index().rename(columns={"index":"薪资区间", salary_col:"人数", "count":"人数"})
+    if status_col:
+        mask = df[status_col].astype(str).str.contains("待就业|未就业|未落实|暂无", regex=True, na=False)
+        cols = [c for c in [college_col, major_col, class_col, name_col, status_col, unit_col, industry_col, salary_col] if c]
+        outputs["未就业学生清单"] = df.loc[mask, cols] if cols else df.loc[mask]
+    if college_col and status_col:
+        tmp = df.copy()
+        tmp["_已落实"] = is_done(tmp[status_col]).astype(int)
+        outputs["院系汇总报告"] = tmp.groupby(college_col, dropna=False).agg(学生数=(status_col,"count"),已落实人数=("_已落实","sum")).reset_index()
+        outputs["院系汇总报告"]["落实率"] = outputs["院系汇总报告"]["已落实人数"] / outputs["院系汇总报告"]["学生数"].clip(lower=1)
+    return outputs
+
+
+def grading_deep_report() -> Dict[str, pd.DataFrame]:
+    rows = [
+        {"学生":"李明","得分":92,"等级":"优秀","雷同风险":"低","历史趋势":"连续高分","教师提示":"可表扬，建议鼓励其分享写作结构。"},
+        {"学生":"王婷","得分":86,"等级":"优秀","雷同风险":"低","历史趋势":"稳定提升","教师提示":"表现较好，可关注其案例深度。"},
+        {"学生":"陈宇","得分":72,"等级":"及格","雷同风险":"中","历史趋势":"波动","教师提示":"建议人工复核雷同段落并提醒改进。"},
+        {"学生":"赵悦","得分":55,"等级":"需重点辅导","雷同风险":"高","历史趋势":"连续低分","教师提示":"建议单独沟通，明确作业结构和评分标准。"},
+        {"学生":"周航","得分":94,"等级":"优秀","雷同风险":"低","历史趋势":"连续高分","教师提示":"可表扬，适合作为优秀样例。"},
+    ]
+    df = pd.DataFrame(rows)
+    summary = pd.DataFrame([{
+        "平均分": round(df["得分"].mean(),2),
+        "优秀人数": int((df["得分"]>=85).sum()),
+        "低分风险人数": int((df["得分"]<60).sum()),
+        "中高雷同风险人数": int(df["雷同风险"].isin(["中","高"]).sum()),
+        "建议": "优先复核高雷同风险与连续低分学生，表扬连续高分学生。"
+    }])
+    trend = pd.DataFrame([
+        {"学生":"李明","上次":88,"本次":92,"趋势":"提升"},
+        {"学生":"王婷","上次":80,"本次":86,"趋势":"提升"},
+        {"学生":"陈宇","上次":76,"本次":72,"趋势":"下降"},
+        {"学生":"赵悦","上次":58,"本次":55,"趋势":"连续低分"},
+        {"学生":"周航","上次":91,"本次":94,"趋势":"稳定优秀"},
+    ])
+    return {"AI批改深度结果": df, "班级学习风险预警": summary, "作业批改历史趋势": trend}
+
+
+def make_presentation_talk(scenario: Dict[str, Any], result: Dict[str, Any], deep_outputs: Dict[str, pd.DataFrame]) -> str:
+    trust = result.get("trust", 0)
+    rows = result.get("rows", 0)
+    issue_count = len(result.get("issues", []))
+    lines = [
+        f"各位好，本次汇报基于“{scenario['name']}”场景，共纳入 {rows} 条数据。",
+        f"系统给出的数据可信度为 {trust}/100，问题清单中识别出 {issue_count} 项需要复核的内容。",
+    ]
+    if "电商" in scenario["name"]:
+        lines += [
+            "从售后数据看，建议重点关注退款原因集中项、高退款金额商品、处理超时工单和客服处理效率。",
+            "下一步建议：先处理高风险工单，再复核高频退货商品，最后优化客服响应流程。",
+        ]
+    elif "高校" in scenario["name"]:
+        lines += [
+            "从就业与实习数据看，建议重点关注未落实学生、专业/班级就业率差异、薪资区间分布和实习单位集中度。",
+            "下一步建议：对未就业学生建立帮扶台账，对优质实习单位进行长期合作维护。",
+        ]
+    elif "作业" in scenario["name"]:
+        lines += [
+            "从作业批改结果看，建议重点关注连续低分学生和疑似雷同内容，同时对连续高分学生给予表扬。",
+            "下一步建议：教师复核高风险样本，并针对共性问题统一讲解评分标准。",
+        ]
+    else:
+        lines.append("建议先复核字段映射和问题清单，再将报告用于正式汇报。")
+    return "\n".join(lines)
+
+
+def analyze_df(df: pd.DataFrame, scenario: Dict[str, Any]) -> Dict[str, Any]:
+    field_map = map_fields(df, scenario["required"])
+    structure_report = inspect_file_structure(df)
+    missing = field_map[field_map["状态"] == "缺失"]["标准字段"].tolist()
+    rows = len(df)
+    money_col = find_col(df, "金额") or find_col(df, "退款金额") or find_col(df, "薪资")
+    total = 0.0
+    if money_col:
+        total = pd.to_numeric(df[money_col], errors="coerce").fillna(0).sum()
+    structure_penalty = int((structure_report["状态"].astype(str).isin(["需复核","需清理","异常"]).sum()) * 4)
+    issue_count = int(len(missing) * 3) + structure_penalty
+    if money_col:
+        issue_count += int(pd.to_numeric(df[money_col], errors="coerce").isna().sum())
+    trust = max(20, min(100, 100 - len(missing) * 12 - issue_count * 2))
+    summary_lines = [
+        f"本次选择场景：{scenario['name']}。",
+        f"共处理 {rows} 条记录。",
+        f"识别到关键金额列：{money_col or '未识别'}。",
+        f"数据可信度评分：{trust} / 100。",
+    ]
+    if missing:
+        summary_lines.append("存在缺失字段：" + "、".join(missing) + "，建议先补齐再用于正式汇报。")
+    else:
+        summary_lines.append("必需字段识别完整，可以进入进一步分析和报告输出。")
+    if "电商" in scenario["name"]:
+        reason_col = find_col(df, "退款原因")
+        if reason_col and len(df):
+            top_reason = df[reason_col].astype(str).value_counts().idxmax()
+            summary_lines.append(f"最高频退款/售后原因是：{top_reason}，建议优先复核对应商品、渠道和客服处理流程。")
+    if "高校" in scenario["name"]:
+        status_col = find_col(df, "就业状态")
+        if status_col and len(df):
+            done = df[status_col].astype(str).str.contains("已就业|升学|实习|签约|录用|创业", regex=True).sum()
+            rate = done / max(rows, 1) * 100
+            summary_lines.append(f"就业/升学/实习等已落实人数 {done} 人，落实率约 {rate:.1f}%。")
+    issues = [{"级别": "高", "问题类型": "缺失必需字段", "问题详情": f"缺少字段：{m}", "建议处理": f"补充 {m} 字段或建立字段别名映射。"} for m in missing]
+    for _, r in structure_report.iterrows():
+        if r["状态"] in ["需复核","需清理","异常"]:
+            issues.append({"级别":"中", "问题类型":"文件结构问题", "问题详情": f"{r['检测项']}：{r['当前值']}，状态：{r['状态']}", "建议处理": r["建议"]})
+    issue_df = pd.DataFrame(issues) if issues else pd.DataFrame(columns=["级别", "问题类型", "问题详情", "建议处理"])
+    deep_outputs = {}
+    if "电商" in scenario["name"]:
+        deep_outputs = ecommerce_deep_analysis(df)
+    elif "高校" in scenario["name"]:
+        deep_outputs = education_deep_analysis(df)
+    elif "作业" in scenario["name"]:
+        deep_outputs = grading_deep_report()
+    result = {"field_map": field_map, "structure_report": structure_report, "trust": trust, "summary": "\n".join(summary_lines), "issues": issue_df, "total": total, "rows": rows, "deep_outputs": deep_outputs}
+    result["talk_script"] = make_presentation_talk(scenario, result, deep_outputs)
+    return result
+
+
+def make_report_zip(df: pd.DataFrame, scenario: Dict[str, Any], result: Dict[str, Any]) -> bytes:
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="原始数据", index=False)
+        result["field_map"].to_excel(writer, sheet_name="字段识别", index=False)
+        result.get("structure_report", pd.DataFrame()).to_excel(writer, sheet_name="文件结构检测", index=False)
+        result["issues"].to_excel(writer, sheet_name="问题清单", index=False)
+        metric_explanations(result).to_excel(writer, sheet_name="指标解释", index=False)
+        pd.DataFrame([{"场景": scenario["name"], "记录数": result["rows"], "合计值": result["total"], "数据可信度": result["trust"], "摘要": result["summary"], "汇报话术": result.get("talk_script", "")}]).to_excel(writer, sheet_name="分析摘要", index=False)
+        for name, sheet_df in result.get("deep_outputs", {}).items():
+            safe_name = str(name)[:31]
+            sheet_df.to_excel(writer, sheet_name=safe_name, index=False)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("深度分析报告.xlsx", excel_buffer.getvalue())
+        z.writestr("AI经营_就业_批改摘要.txt", result["summary"])
+        z.writestr("AI自动生成汇报话术.txt", result.get("talk_script", ""))
+        z.writestr("问题清单.csv", result["issues"].to_csv(index=False).encode("utf-8-sig"))
+        z.writestr("文件结构检测.csv", result.get("structure_report", pd.DataFrame()).to_csv(index=False).encode("utf-8-sig"))
+    return zip_buffer.getvalue()
+
+
+def render_visual_summary(result: Dict[str, Any], scenario: Dict[str, Any]):
+    st.markdown("#### 样例报告视觉总览")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(f"<div class='metric-card'><h2>{result['rows']}</h2><p>纳入记录</p></div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"<div class='metric-card'><h2>{result['trust']}</h2><p>数据可信度</p></div>", unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"<div class='metric-card'><h2>{len(result['issues'])}</h2><p>待复核问题</p></div>", unsafe_allow_html=True)
+    st.markdown("#### AI 自动生成汇报话术")
+    st.success(result.get("talk_script", "暂无汇报话术。"))
+
+
+def render_result(df: pd.DataFrame, scenario: Dict[str, Any], result: Dict[str, Any]):
+    render_visual_summary(result, scenario)
+    st.markdown("#### AI / 规则诊断摘要")
+    st.info(result["summary"])
+    tabs = st.tabs(["核心指标解释", "深度分析", "字段与结构检测", "问题清单", "原始数据"])
+    with tabs[0]:
+        st.dataframe(metric_explanations(result), use_container_width=True)
+    with tabs[1]:
+        deep_outputs = result.get("deep_outputs", {})
+        if deep_outputs:
+            for name, sheet_df in deep_outputs.items():
+                st.markdown(f"##### {name}")
+                st.dataframe(sheet_df, use_container_width=True)
+        else:
+            st.write("该场景暂无深度分析表。")
+    with tabs[2]:
+        st.markdown("##### 字段识别")
+        st.dataframe(result["field_map"], use_container_width=True)
+        st.markdown("##### 文件结构检测")
+        st.dataframe(result.get("structure_report", pd.DataFrame()), use_container_width=True)
+    with tabs[3]:
+        if len(result["issues"]):
+            st.dataframe(result["issues"], use_container_width=True)
+        else:
+            st.success("暂无明显问题。")
+    with tabs[4]:
+        st.dataframe(df, use_container_width=True)
+    report_zip = make_report_zip(df, scenario, result)
+    st.download_button("下载深度报告包 ZIP", data=report_zip, file_name=f"Aurevia_{scenario['name']}_深度报告包.zip", mime="application/zip", use_container_width=True, key=f"download_b52_report_zip_{scenario['name']}")
+
+
+def render_sample_reports():
+    st.markdown("## 样例报告库")
+    st.markdown("<div class='successbox'>Batch 54 已保留三大核心场景深度分析，并新增指标解释库、图表化样例、场景配置向导、PWA 与桌面封装方案。</div>", unsafe_allow_html=True)
+    tabs = st.tabs(["电商售后深度样例报告", "高校就业深度样例报告", "AI作业批改深度样例报告"])
+    with tabs[0]:
+        sample_report_card("电商售后深度样例报告", "电商", "覆盖退款原因、商品风险、渠道售后、客服效率、高风险工单、结构检测和汇报话术。")
+    with tabs[1]:
+        sample_report_card("高校就业深度样例报告", "高校", "覆盖就业去向、专业班级就业率、行业分布、薪资区间、未就业清单、院系报告和汇报话术。")
+    with tabs[2]:
+        st.markdown("### AI作业批改深度样例报告")
+        st.write("覆盖深度评分、雷同风险、历史趋势、学生成长画像、班级风险预警和教师汇报话术。")
+        deep = grading_deep_report()
+        for name, df in deep.items():
+            st.markdown(f"#### {name}")
+            st.dataframe(df, use_container_width=True)
+        st.download_button("下载 AI 作业批改完整样例报告包", data=make_assignment_sample_report_zip(), file_name="AI作业批改深度样例报告包.zip", mime="application/zip", use_container_width=True, key="b52_sample_grading_report_zip")
+
+
+
+
+# ----------------------------
+# Batch 53/54: 指标解释库、场景配置向导、App/桌面封装方案
+# ----------------------------
+SCENE_METRIC_LIBRARY = {
+    "电商": [
+        {"指标": "退款金额", "解释": "反映售后退款规模。金额高不一定代表经营差，但需要结合退款原因和商品分析。", "建议": "优先检查高退款商品和高频退款原因。"},
+        {"指标": "退款原因占比", "解释": "用于判断售后问题是集中在质量、物流、尺码、体验还是客服流程。", "建议": "原因集中时，优先做专项改进。"},
+        {"指标": "客服处理时长", "解释": "衡量售后响应和结案效率，处理过慢会影响用户满意度。", "建议": "对超时工单设置优先级和处理 SLA。"},
+        {"指标": "高风险工单", "解释": "通常包含高金额退款、超时未完结、重复投诉或原因缺失等问题。", "建议": "先处理高金额、高超时、高投诉的工单。"},
+    ],
+    "高校": [
+        {"指标": "就业落实率", "解释": "反映班级、专业或院系学生就业、升学、实习等去向落实情况。", "建议": "低落实率专业需要优先辅导和资源跟进。"},
+        {"指标": "未就业学生数", "解释": "用于识别需要重点帮扶的学生群体。", "建议": "生成未就业清单，分配辅导员跟进。"},
+        {"指标": "薪资区间", "解释": "反映就业质量的参考维度，但不能单独代表培养质量。", "建议": "结合岗位、行业、地区一起分析。"},
+        {"指标": "实习单位集中度", "解释": "反映实习资源是否过度集中或是否形成稳定合作单位。", "建议": "对高频实习单位建立长期合作。"},
+    ],
+    "作业": [
+        {"指标": "平均得分", "解释": "反映班级整体作业完成质量。", "建议": "结合低分学生和评分维度进一步分析。"},
+        {"指标": "雷同风险", "解释": "用于辅助筛查作业相似度较高的情况，不等同正式学术查重。", "建议": "对高风险学生进行人工复核。"},
+        {"指标": "历史趋势", "解释": "观察学生连续表现，识别稳定优秀或持续低分。", "建议": "对持续优秀者表扬，对连续低分者重点辅导。"},
+        {"指标": "教师评语", "解释": "辅助老师快速形成个性化反馈，减少重复劳动。", "建议": "正式给分前由教师确认和修订。"},
+    ],
+}
+
+
+def infer_scene_from_columns(columns) -> str:
+    text = " ".join([str(c) for c in columns])
+    candidates = []
+    rules = [
+        ("电商退款 / 售后工单汇总", ["退款", "售后", "工单", "客服", "商品", "订单", "赔付"]),
+        ("高校教务 / 实习 / 就业数据汇总", ["学院", "专业", "班级", "就业", "实习", "薪资", "学号"]),
+        ("AI 作业批改", ["学生", "作业", "评分", "评语", "雷同", "题目"]),
+        ("门店 / 渠道销售日报", ["门店", "渠道", "销售", "订单", "实收", "佣金"]),
+        ("库存盘点差异", ["库存", "盘点", "盘亏", "盘盈", "SKU"]),
+    ]
+    for name, kws in rules:
+        score = sum(1 for k in kws if k in text)
+        if score:
+            candidates.append((score, name, "、".join([k for k in kws if k in text])))
+    if not candidates:
+        return "暂未识别到明确场景。建议选择“模板中心”查看字段要求，或让 AI Agent 根据字段帮你推荐。"
+    candidates.sort(reverse=True)
+    score, name, hits = candidates[0]
+    return f"推荐场景：{name}\n命中字段线索：{hits}\n建议：先使用该模板分析，再根据问题清单修复缺失字段。"
+
+
+def field_repair_guide(scenario: Dict[str, Any], field_map: pd.DataFrame) -> pd.DataFrame:
+    missing = field_map[field_map["状态"] == "缺失"]["标准字段"].tolist() if len(field_map) else []
+    rows = []
+    for f in missing:
+        rows.append({
+            "缺失字段": f,
+            "为什么重要": "这是该场景进行稳定分析和生成报告所需的关键字段。",
+            "修复方式": f"在 Excel 中新增“{f}”列，或把已有相近列名映射为“{f}”。",
+            "可接受示例": "请参考模板说明页或样例报告库中的字段示例。",
+        })
+    if not rows:
+        rows.append({"缺失字段": "无", "为什么重要": "必需字段识别完整。", "修复方式": "可以进入分析和报告输出。", "可接受示例": "无需修复。"})
+    return pd.DataFrame(rows)
+
+
+def audience_talk_script(scenario: Dict[str, Any], result: Dict[str, Any]) -> pd.DataFrame:
+    name = scenario.get("name", "当前场景")
+    rows = result.get("rows", 0)
+    trust = result.get("trust", 0)
+    issues = len(result.get("issues", []))
+    return pd.DataFrame([
+        {"对象": "老板 / 管理层", "话术": f"本次基于{name}纳入{rows}条数据，数据可信度为{trust}/100。建议优先关注影响结果可信度的{issues}项问题，并据此安排下一步经营或管理动作。"},
+        {"对象": "老师 / 教务人员", "话术": f"本次分析可作为教学、就业或作业管理的辅助材料。建议先查看问题清单与风险学生/待就业学生，再由老师进行最终判断。"},
+        {"对象": "运营 / 执行团队", "话术": f"请先处理字段缺失、空值和异常记录，再根据高风险项逐条复核。报告可用于周会、复盘或跨部门沟通。"},
+    ])
+
+
+def render_scene_config_wizard():
+    st.markdown("## 场景配置向导")
+    st.markdown("<div class='successbox'>目标：用户上传文件后，系统自动推荐场景、解释缺失字段，并生成老板/老师/运营不同版本的话术。</div>", unsafe_allow_html=True)
+    files = st.file_uploader("上传一个 Excel / CSV，系统将先做结构检测和场景推荐", type=["xlsx", "csv"], accept_multiple_files=True, key="wizard_upload")
+    if st.button("开始智能配置", use_container_width=True):
+        if not files:
+            st.warning("请先上传文件，或到样例报告库查看演示。")
+            return
+        df, upload_log, repair_tips = read_uploaded_files_with_logs(files)
+        if not len(df):
+            st.error("未能成功读取文件。")
+            st.dataframe(upload_log, use_container_width=True)
+            st.dataframe(repair_tips, use_container_width=True)
+            return
+        st.session_state.wizard_df = df
+        st.session_state.wizard_recommendation = infer_scene_from_columns(df.columns)
+        # choose most likely scenario by text
+        rec = st.session_state.wizard_recommendation
+        scenario = next((s for s in SCENARIOS if s["name"] in rec), SCENARIOS[0])
+        result = analyze_df(df, scenario)
+        st.session_state.wizard_scenario = scenario
+        st.session_state.wizard_result = result
+    if st.session_state.get("wizard_df") is not None:
+        st.markdown("### 自动推荐场景")
+        st.info(st.session_state.get("wizard_recommendation"))
+        result = st.session_state.wizard_result
+        scenario = st.session_state.wizard_scenario
+        st.markdown("### 字段缺失修复向导")
+        st.dataframe(field_repair_guide(scenario, result["field_map"]), use_container_width=True)
+        st.markdown("### AI 生成不同对象汇报话术")
+        st.dataframe(audience_talk_script(scenario, result), use_container_width=True)
+        st.markdown("### 场景独立指标解释库")
+        scene_key = "电商" if "电商" in scenario["name"] else "高校" if "高校" in scenario["name"] else "作业" if "作业" in scenario["name"] else "电商"
+        st.dataframe(pd.DataFrame(SCENE_METRIC_LIBRARY[scene_key]), use_container_width=True)
+        st.markdown("### 图表化概览")
+        try:
+            st.bar_chart(pd.DataFrame({"指标": ["记录数", "可信度", "问题数"], "值": [result["rows"], result["trust"], len(result["issues"])]}).set_index("指标"))
+        except Exception:
+            st.write("当前数据暂不适合图表展示。")
+
+
+def render_app_delivery_plan():
+    st.markdown("## App 与桌面版上线方案（Batch 55 增强）")
+    st.markdown("<div class='infobox'>这不是继续堆功能，而是把产品从网页试用版推进到可安装、可在手机上使用的产品形态。</div>", unsafe_allow_html=True)
+    st.markdown("### 当前判断")
+    st.write("现在已经可以通过网页在电脑和手机浏览器中使用。要变成真正 App / 桌面安装包，建议分三步推进：")
+    roadmap = pd.DataFrame([
+        {"阶段": "1. 移动端 PWA", "目标": "手机浏览器打开并添加到主屏幕", "交付物": "manifest、service worker、移动端布局说明", "难度": "低", "建议时间": "现在即可做"},
+        {"阶段": "2. Windows 桌面壳", "目标": "把网页封装成 .exe 桌面应用", "交付物": "Electron wrapper、build 脚本、安装包说明", "难度": "中", "建议时间": "1-2周内可试用"},
+        {"阶段": "3. 正式手机 App", "目标": "上架应用商店或企业内部分发", "交付物": "React Native/Flutter/Capacitor 项目、隐私合规、应用审核材料", "难度": "高", "建议时间": "产品稳定后"},
+    ])
+    st.dataframe(roadmap, use_container_width=True)
+    st.markdown("### 桌面可执行文件方案")
+    st.write("本开发包已提供增强版 `desktop/electron-wrapper`，包含启动页、网络加载提示和线上地址自动打开逻辑，可把当前 Streamlit 线上地址包装为 Windows 桌面程序。")
+    st.code("""
+cd desktop/electron-wrapper
+npm install
+npm run build
+# 生成文件在 desktop/electron-wrapper/dist/
+""", language="bash")
+    st.markdown("### 手机 PWA 方案")
+    st.write("本开发包已提供 `mobile_pwa/manifest.webmanifest` 和 `mobile_pwa/service-worker.js`。正式接入时建议放到官网静态目录中，并在 HTML 中注册。")
+    st.markdown("### 重要边界")
+    st.warning("Streamlit Cloud 本身适合快速试用和演示。如果要正式做手机 App 与桌面安装包，后续应逐步迁移到更标准的前端架构，例如 React / Next.js + 后端 API。")
+
+
+def render_desktop_launch_page():
+    st.markdown("## 桌面版专属启动页")
+    st.markdown("<div class='infobox'>目标：让 Windows 桌面版打开后不像网页套壳，而像一个真正的桌面应用。</div>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1.25, 1], gap="large")
+    with c1:
+        st.markdown("""
+        <div class='hero'>
+          <div class='chip'>Desktop App Preview</div>
+          <h1>Aurevia 智策云<br>桌面版启动中心</h1>
+          <p>双击桌面图标后先展示品牌启动页，再自动打开线上工作台。适合给试用用户和老师/运营人员使用。</p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("### 桌面版推荐流程")
+        steps = [
+            ("1. 启动页", "展示品牌、网络状态、客服邮箱与版本号。"),
+            ("2. 自动打开线上地址", "默认打开 https://orbiretail-saas.streamlit.app/。"),
+            ("3. 异常处理", "如果网络异常，提示用户检查网络或联系 2790569814@qq.com。"),
+            ("4. 长期方向", "后续可加入本地缓存、离线说明、自动更新和崩溃日志。"),
+        ]
+        for title, desc in steps:
+            st.markdown(f"<div class='step-card'><b>{title}</b><br><span class='small'>{desc}</span></div>", unsafe_allow_html=True)
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("### 桌面版状态")
+        st.write("本开发包已包含增强后的 Electron 桌面封装文件：")
+        st.code("desktop/electron-wrapper/", language="text")
+        st.write("Windows 打包入口：")
+        st.code("build_desktop_windows.bat", language="text")
+        st.write("开发预览入口：")
+        st.code("run_desktop_dev.bat", language="text")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("### 桌面版打包步骤")
+    st.code("""
+cd desktop/electron-wrapper
+npm install
+npm run build
+# 生成安装包在 desktop/electron-wrapper/dist/
+""", language="bash")
+    st.warning("正式分发前建议做：Windows 11 测试、杀毒误报测试、安装/卸载测试、桌面快捷方式测试、首次启动测试。")
+
+
+def render_mobile_experience_page():
+    st.markdown("## 移动端体验优化")
+    st.markdown("<div class='infobox'>目标：让手机浏览器打开后能快速看懂、能查看报告、能知道如何上传或下载。</div>", unsafe_allow_html=True)
+
+    st.markdown("### 手机端报告卡片示例")
+    cards = [
+        ("电商售后", "退款金额 52,430 元", "高风险工单 12 条", "建议先处理高金额退款和响应超时工单。"),
+        ("高校就业", "落实率 80.26%", "待就业 15 人", "建议重点跟进低落实率专业和未就业学生清单。"),
+        ("AI 作业批改", "平均分 82.4", "疑似雷同 3 份", "建议复核雷同作业并关注连续低分学生。"),
+    ]
+    cols = st.columns(3)
+    for col, (title, kpi, risk, advice) in zip(cols, cards):
+        with col:
+            st.markdown(
+                f"""
+                <div class='mobile-card'>
+                  <span class='report-chip'>手机报告</span>
+                  <h3>{title}</h3>
+                  <p><b>{kpi}</b></p>
+                  <p>{risk}</p>
+                  <p class='small'>{advice}</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("### 移动端上传提示")
+    st.markdown("""
+    - 手机端适合查看报告、提交反馈、使用 AI Agent、查看样例结果。
+    - 大文件上传建议在电脑端完成，尤其是 ZIP 作业包、多个 Excel 或大 PDF。
+    - 手机上传前建议确认文件格式为 `.xlsx`、`.csv`、`.docx`、`.pdf` 或 `.zip`。
+    - 如果手机上传失败，建议改用电脑上传，或把文件另存为标准格式后重试。
+    """)
+
+    st.markdown("### 手机端产品原则")
+    st.dataframe(pd.DataFrame([
+        {"原则": "少表格，多卡片", "说明": "手机屏幕不适合横向大表格，应优先展示摘要卡片。"},
+        {"原则": "先结论，再明细", "说明": "先展示AI摘要、风险和建议，再允许用户展开明细。"},
+        {"原则": "下载为辅，查看为主", "说明": "手机端重点看摘要，完整报告下载更适合电脑端。"},
+        {"原则": "上传需提示", "说明": "大文件、ZIP、PDF批改应明确建议电脑端使用。"},
+    ]), use_container_width=True)
+
+
+def render_pwa_install_guide():
+    st.markdown("## PWA 安装引导")
+    st.markdown("<div class='infobox'>PWA 是当前最稳的手机轻应用路线：不用立刻上架应用商店，也能让用户添加到主屏幕。</div>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### 用户手机上怎么安装")
+        st.markdown("""
+        **iPhone / Safari**
+        1. 打开 `https://orbiretail-saas.streamlit.app/`
+        2. 点击分享按钮
+        3. 选择“添加到主屏幕”
+        4. 命名为“Aurevia 智策云”
+
+        **Android / Chrome**
+        1. 打开网址
+        2. 点击右上角菜单
+        3. 选择“添加到主屏幕”或“安装应用”
+        4. 从桌面图标进入
+        """)
+    with c2:
+        st.markdown("### 开发侧要做什么")
+        st.markdown("""
+        本包已提供：
+        ```text
+        mobile_pwa/manifest.webmanifest
+        mobile_pwa/service-worker.js
+        mobile_pwa/pwa_integration.html
+        ```
+        若后续建设独立官网或 React 前端，应把这些文件接入静态站点。
+        """)
+
+    st.markdown("### PWA 边界")
+    st.warning("Streamlit Cloud 可以被手机浏览器访问，但完整 PWA 能力更适合在独立前端或官网中实现。当前版本属于 PWA 准备方案，不是正式应用商店 App。")
+
+
+def render_legal_pages():
+    st.markdown("## 隐私政策 / 用户协议正式页面")
+    st.markdown("<div class='infobox'>本页用于产品正式试用前的合规基础说明。内容是产品草案，正式对外发布前建议再做专业审阅。</div>", unsafe_allow_html=True)
+
+    tab1, tab2 = st.tabs(["隐私政策草案", "用户协议草案"])
+    with tab1:
+        st.markdown("""
+        ### 隐私政策草案
+
+        **1. 我们处理哪些数据**  
+        用户可能上传 Excel、CSV、Word、PDF、ZIP 作业包等文件。文件中可能包含订单、售后、学生、就业、作业、薪资、门店经营等信息。
+
+        **2. 数据用途**  
+        上传数据仅用于完成用户选择的分析、批改、摘要生成、问题识别和报告导出。
+
+        **3. 敏感数据提醒**  
+        如果文件中包含身份证号、手机号、薪资、学生作业、就业去向等敏感内容，建议用户先脱敏后上传。
+
+        **4. 数据删除**  
+        用户可以在“隐私与数据”页面清空当前会话数据、删除历史记录、删除反馈和 AI 设置。
+
+        **5. AI 使用边界**  
+        AI 结果用于辅助分析和辅助批改，不替代人工最终判断。涉及成绩、处分、就业质量判断时，应由教师或负责人复核。
+
+        **6. 联系方式**  
+        如需删除数据或反馈问题，请联系：2790569814@qq.com
+        """)
+    with tab2:
+        st.markdown("""
+        ### 用户协议草案
+
+        **1. 产品用途**  
+        Aurevia 智策云用于结构化数据分析、报告生成、AI 辅助批改和效率提升。
+
+        **2. 用户责任**  
+        用户应保证上传数据来源合法，并对数据内容、授权范围和使用目的负责。
+
+        **3. 结果边界**  
+        系统输出的分析、评分、建议和报告属于辅助结果，不构成法律、财务、教学或管理上的最终结论。
+
+        **4. 禁止用途**  
+        不得上传违法数据、侵犯他人隐私的数据或用于欺诈、歧视、非法监控等目的。
+
+        **5. 反馈与支持**  
+        遇到无法解决的问题，可联系：2790569814@qq.com
+        """)
+
+
+def render_app_store_checklist():
+    st.markdown("## App 上架前检查清单")
+    st.markdown("<div class='infobox'>当前阶段建议先做网页 + PWA + 桌面壳。正式手机 App 上架应在产品稳定、隐私和数据流程更成熟后进行。</div>", unsafe_allow_html=True)
+
+    checklist = pd.DataFrame([
+        {"类别": "产品稳定性", "检查项": "核心场景能连续完成，不频繁报错或回弹", "状态": "需要持续验证"},
+        {"类别": "隐私合规", "检查项": "隐私政策、用户协议、数据删除机制、敏感数据提示", "状态": "本批已提供草案"},
+        {"类别": "账号体系", "检查项": "登录、注册、找回、用户数据隔离", "状态": "MVP阶段"},
+        {"类别": "AI边界", "检查项": "说明AI为辅助，不替代老师/运营/财务最终判断", "状态": "已加入说明"},
+        {"类别": "上传能力", "检查项": "手机端大文件上传稳定性与错误提示", "状态": "建议继续测试"},
+        {"类别": "报告查看", "检查项": "手机端摘要卡片、关键指标、下载提示", "状态": "本批增强"},
+        {"类别": "应用材料", "检查项": "应用名称、图标、截图、介绍文案、客服邮箱", "状态": "需要准备"},
+        {"类别": "分发路线", "检查项": "先PWA/桌面版，后正式App上架", "状态": "推荐路线"},
+    ])
+    st.dataframe(checklist, use_container_width=True)
+
+    st.markdown("### 建议路线")
+    st.markdown("""
+    1. 先稳定网页版本和 PWA 体验。  
+    2. 打包 Windows 桌面版给小范围用户试用。  
+    3. 收集手机端使用反馈，判断是否真的需要正式 App。  
+    4. 再决定使用 Flutter / React Native / Capacitor 开发正式移动端。  
+    """)
+
+
+
+
+def render_ai_recommendation_strategy():
+    st.markdown("## AI 模型自动推荐策略迭代")
+    st.markdown("<div class='infobox'>本页根据用户行为、历史分析记录、数据可信度和问题数量，动态调整场景模板推荐顺序。</div>", unsafe_allow_html=True)
+    rec = scenario_recommendation_scores()
+    top = rec.iloc[0].to_dict() if not rec.empty else {}
+    if top:
+        st.markdown(f"""
+        <div class='recommend-card'>
+          <h2>当前优先推荐：{top.get('场景')}</h2>
+          <p>{top.get('推荐理由')}</p>
+          <p>推荐分：{top.get('推荐分')}｜平均可信度：{top.get('平均可信度')}｜历史使用：{top.get('历史使用')}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    st.markdown("### 推荐策略评分表")
+    st.dataframe(rec, use_container_width=True)
+    st.markdown("### 推荐策略如何迭代")
+    st.markdown("""
+    - 用户经常选择的模板会提高推荐分。
+    - 数据可信度高、问题少的模板会优先推荐。
+    - 电商、高校、AI作业批改作为当前核心方向，会获得适度战略加权。
+    - 如果某个场景平均问题数偏高，系统会建议优先完善字段修复向导。
+    """)
+    if st.button("生成一次推荐快照", use_container_width=True):
+        if top:
+            try:
+                conn = db_conn()
+                conn.execute("INSERT INTO recommendation_snapshots(user_email, top_scenario, reason, score, created_at) VALUES (?, ?, ?, ?, ?)", (current_email() if is_logged_in() else "guest", top.get("场景"), top.get("推荐理由"), float(top.get("推荐分", 0)), datetime.now().isoformat()))
+                conn.commit(); conn.close()
+                log_event("recommendation_snapshot", page="AI推荐策略", scenario=top.get("场景"), detail={"score": top.get("推荐分")})
+                st.success("推荐快照已保存。")
+            except Exception as e:
+                st.error(f"保存失败：{e}")
+
+
+def render_interactive_charts():
+    st.markdown("## 高级交互图表")
+    st.markdown("<div class='infobox'>图表用于让手机端和桌面端用户快速理解数据。当前采用“图表 + 指标选择”的交互方式，确保在 Streamlit 环境下稳定可用。</div>", unsafe_allow_html=True)
+    hist = safe_read_analysis_history()
+    if hist.empty:
+        st.info("暂无真实历史数据，已展示演示交互图表。")
+        hist = pd.DataFrame([
+            {"scenario": "电商退款 / 售后工单汇总", "rows_count": 128, "trust_score": 86, "issue_count": 4, "created_at": datetime.now().isoformat()},
+            {"scenario": "高校教务 / 实习 / 就业数据汇总", "rows_count": 76, "trust_score": 82, "issue_count": 6, "created_at": datetime.now().isoformat()},
+            {"scenario": "AI 作业批改", "rows_count": 38, "trust_score": 79, "issue_count": 3, "created_at": datetime.now().isoformat()},
+        ])
+    summary = hist.groupby("scenario", as_index=False).agg(分析次数=("scenario", "count"), 平均可信度=("trust_score", "mean"), 平均问题数=("issue_count", "mean"), 平均记录数=("rows_count", "mean"))
+    summary["平均可信度"] = summary["平均可信度"].round(1)
+    summary["平均问题数"] = summary["平均问题数"].round(1)
+    summary["平均记录数"] = summary["平均记录数"].round(1)
+    st.markdown("### 场景表现总览")
+    if px is not None:
+        fig = px.bar(summary, x="scenario", y="平均可信度", color="平均问题数", hover_data=["分析次数", "平均记录数"], title="场景平均可信度与问题数")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.bar_chart(summary.set_index("scenario")[["平均可信度"]])
+    selected = st.selectbox("点击 / 选择一个场景查看详细解释", summary["scenario"].tolist())
+    row = summary[summary["scenario"] == selected].iloc[0].to_dict()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("分析次数", int(row["分析次数"]))
+    c2.metric("平均可信度", row["平均可信度"])
+    c3.metric("平均问题数", row["平均问题数"])
+    c4.metric("平均记录数", row["平均记录数"])
+    st.markdown("### 指标解释与建议")
+    st.dataframe(pd.DataFrame([
+        {"指标": "平均可信度", "解释": "越高表示字段完整、异常少、数据结构更稳定。", "建议": "低于75时应优先修复字段和表头结构。"},
+        {"指标": "平均问题数", "解释": "反映每次分析中发现的缺字段、空值、格式错误等问题。", "建议": "问题数偏高时应强化上传前模板说明和字段修复向导。"},
+        {"指标": "分析次数", "解释": "代表用户对该场景的使用频率。", "建议": "高频场景优先做深度报告、样例和AI话术。"},
+        {"指标": "平均记录数", "解释": "反映场景单次处理数据规模。", "建议": "记录数高的场景应优化上传体验和报告下载速度。"},
+    ]), use_container_width=True)
+
+
+def render_user_experience_analytics():
+    st.markdown("## 用户体验数据分析")
+    st.markdown("<div class='infobox'>本页把用户操作转化为产品优化建议。它不是监控用户隐私，而是帮助你判断产品哪里最值得继续打磨。</div>", unsafe_allow_html=True)
+    events = load_behavior_events(1000)
+    hist = safe_read_analysis_history()
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("行为事件", len(events))
+    m2.metric("分析次数", len(hist))
+    m3.metric("平均可信度", f"{hist['trust_score'].mean():.1f}" if not hist.empty else "0")
+    m4.metric("平均问题数", f"{hist['issue_count'].mean():.1f}" if not hist.empty else "0")
+    tab1, tab2, tab3, tab4 = st.tabs(["行为看板", "产品优化建议", "自动化使用报告", "原始数据"])
+    with tab1:
+        if events.empty:
+            st.info("暂无行为数据。你可以点击页面、生成样例、上传文件后再回来查看。")
+        else:
+            page_counts = events["page"].replace("", "未记录页面").value_counts().reset_index()
+            page_counts.columns = ["页面", "次数"]
+            event_counts = events["event_type"].value_counts().reset_index()
+            event_counts.columns = ["事件类型", "次数"]
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("#### 页面访问")
+                if px is not None:
+                    st.plotly_chart(px.bar(page_counts, x="页面", y="次数", title="页面访问次数"), use_container_width=True)
+                else:
+                    st.bar_chart(page_counts.set_index("页面"))
+            with c2:
+                st.markdown("#### 事件类型")
+                if px is not None:
+                    st.plotly_chart(px.pie(event_counts, names="事件类型", values="次数", title="行为事件构成"), use_container_width=True)
+                else:
+                    st.bar_chart(event_counts.set_index("事件类型"))
+    with tab2:
+        suggestions = generate_product_optimization_suggestions()
+        st.dataframe(suggestions, use_container_width=True)
+        st.download_button("下载产品优化建议 CSV", suggestions.to_csv(index=False).encode("utf-8-sig"), file_name="Aurevia_产品优化建议.csv", mime="text/csv", use_container_width=True, key="download_ux_suggestions")
+    with tab3:
+        report = automated_usage_report_text()
+        st.text_area("自动化使用报告", value=report, height=320)
+        st.download_button("下载自动化使用报告 TXT", report.encode("utf-8"), file_name="Aurevia_自动化使用报告.txt", mime="text/plain", use_container_width=True, key="download_usage_report")
+    with tab4:
+        st.markdown("#### 行为事件")
+        st.dataframe(events, use_container_width=True)
+        st.markdown("#### 分析历史")
+        st.dataframe(hist, use_container_width=True)
+
 
 # ----------------------------
 # Main
@@ -753,16 +1895,45 @@ Batch 51：免费版体验打磨 + 样例报告库 + 用户首次成功路径优
 def main():
     sidebar()
     page = st.session_state.page
+    if st.session_state.get("last_logged_page") != page:
+        log_event("page_view", page=page)
+        st.session_state.last_logged_page = page
     if page == "首页":
         render_home()
+    elif page == "首次使用向导":
+        render_first_success_guide()
     elif page == "工作台":
         render_workspace()
+    elif page == "场景配置向导":
+        render_scene_config_wizard()
+    elif page == "样例报告库":
+        render_sample_reports()
     elif page == "模板中心":
         render_templates()
+    elif page == "AI推荐策略":
+        render_ai_recommendation_strategy()
+    elif page == "交互图表":
+        render_interactive_charts()
+    elif page == "体验数据分析":
+        render_user_experience_analytics()
     elif page == "AI智能中心":
         render_ai_center()
     elif page == "AI作业批改":
         render_grading()
+    elif page == "隐私与数据":
+        render_privacy_data()
+    elif page == "App与桌面版":
+        render_app_delivery_plan()
+    elif page == "桌面版启动页":
+        render_desktop_launch_page()
+    elif page == "移动端体验":
+        render_mobile_experience_page()
+    elif page == "PWA安装引导":
+        render_pwa_install_guide()
+    elif page == "协议与政策":
+        render_legal_pages()
+    elif page == "上架前检查":
+        render_app_store_checklist()
     elif page == "系统后台":
         render_admin()
     elif page == "反馈":
